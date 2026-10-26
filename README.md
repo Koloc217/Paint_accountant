@@ -45,3 +45,7 @@ Development and testing happen on a Raspberry Pi 5 (8 GB), but the Pi is not a r
 5. Import of external paint datasets (name, manufacturer, code, hex)
 
 Later ideas (return-to-box, cross-brand substitutes by color distance, shopping list, and more) are listed at the end of [plans.md](plans.md).
+
+## Acknowledgements
+
+Third-party code or data used in this project will be credited here, with its original license kept in the repository.

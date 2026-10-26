@@ -124,3 +124,19 @@
 - **Локальная vision-модель** для массовой заливки фото ряда банок (проверить скорость на Pi 5).
 - **HTTPS / Web NFC / живой сканер штрихкодов** — через флаг Chrome «Insecure origins treated as secure» или сертификат.
 - **Связка с Project Hub** — список красок для проекта покраски.
+
+---
+
+## Заимствования и лицензии
+
+Если берём чужой код или данные — отмечаем это явно.
+
+**minipainter** (github.com/ArturSkowronski/minipainter) — лицензия MIT, © 2026 Artur Skowronski.
+- MIT разрешает копировать и переделывать, но при переносе кода или данных **обязательно сохранить их copyright и текст лицензии** — одной строчки «спасибо» для этого недостаточно.
+- Каталог красок там — JSON по брендам (`data/catalog/`: Citadel, Army Painter, Vallejo, AK) с полями name, aliases, usage_roles, color_families, rgb. Источник самих цветов в репозитории не указан, значения RGB автор называет приблизительными.
+
+Порядок при заимствовании:
+- [ ] В шапке перенесённого файла — комментарий «адаптировано из minipainter, MIT, © Artur Skowronski» со ссылкой
+- [ ] Текст их лицензии — в `THIRD_PARTY_LICENSES.md` (или `LICENSES/minipainter.txt`)
+- [ ] В README — раздел **Acknowledgements** с нейтральной формулировкой: «Paint catalog data adapted from minipainter by Artur Skowronski (MIT)»
+- [ ] Выбрать лицензию для самого проекта (MIT совместима и проще всего)
