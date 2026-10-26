@@ -108,6 +108,52 @@ MIGRATIONS: list[str] = [
     ALTER TABLE paint ADD COLUMN barcode TEXT;
     CREATE UNIQUE INDEX paint_barcode_uq ON paint (barcode) WHERE barcode IS NOT NULL;
     """,
+    # 4 — a paint can lie in several storages ("at hand 1, Запас 2").
+    #     Pots move from paint.quantity/storage_id to paint_location.
+    #     One storage is the default (an "at hand" one), and a storage can send
+    #     second and further pots of the same paint to its "copies" storage.
+    """
+    ALTER TABLE storage ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0 CHECK (is_default IN (0, 1));
+    ALTER TABLE storage ADD COLUMN copies_storage_id INTEGER REFERENCES storage (id) ON DELETE SET NULL;
+    CREATE UNIQUE INDEX storage_default_uq ON storage (is_default) WHERE is_default = 1;
+
+    -- the default "at hand" storage: an existing one if there is, else a new "Под рукой"
+    UPDATE storage SET at_hand = 1
+        WHERE py_lower(name) = 'под рукой' AND NOT EXISTS (SELECT 1 FROM storage WHERE at_hand = 1);
+    INSERT INTO storage (name, at_hand)
+        SELECT 'Под рукой', 1 WHERE NOT EXISTS (SELECT 1 FROM storage WHERE at_hand = 1);
+    UPDATE storage SET is_default = 1
+        WHERE id = (SELECT min(id) FROM storage WHERE at_hand = 1);
+
+    CREATE TABLE paint_location (
+        paint_id   INTEGER NOT NULL REFERENCES paint (id) ON DELETE CASCADE,
+        storage_id INTEGER REFERENCES storage (id),  -- NULL = without a storage
+        quantity   INTEGER NOT NULL CHECK (quantity > 0)
+    );
+    CREATE UNIQUE INDEX paint_location_uq ON paint_location (paint_id, ifnull(storage_id, 0));
+    CREATE INDEX paint_location_storage_ix ON paint_location (storage_id);
+
+    INSERT INTO paint_location (paint_id, storage_id, quantity)
+        SELECT id, storage_id, quantity FROM paint WHERE quantity > 0;
+
+    CREATE TABLE paint_new (
+        id              INTEGER PRIMARY KEY,
+        name            TEXT    NOT NULL,
+        manufacturer_id INTEGER NOT NULL REFERENCES manufacturer (id) ON DELETE RESTRICT,
+        code            TEXT,
+        barcode         TEXT,
+        hex             TEXT    CHECK (hex IS NULL OR hex GLOB '#[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]'),
+        created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+        updated_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+    INSERT INTO paint_new (id, name, manufacturer_id, code, barcode, hex, created_at, updated_at)
+        SELECT id, name, manufacturer_id, code, barcode, hex, created_at, updated_at FROM paint;
+    DROP TABLE paint;
+    ALTER TABLE paint_new RENAME TO paint;
+    CREATE UNIQUE INDEX paint_identity_uq ON paint (manufacturer_id, name COLLATE NOCASE, ifnull(code, ''));
+    CREATE INDEX paint_manufacturer_ix ON paint (manufacturer_id);
+    CREATE UNIQUE INDEX paint_barcode_uq ON paint (barcode) WHERE barcode IS NOT NULL;
+    """,
 ]
 
 # Starter tags: (name, plaque color, label keywords)

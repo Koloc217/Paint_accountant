@@ -38,17 +38,24 @@ def _like_pattern(text: str) -> str:
 # ======================= storages =======================
 
 _STORAGE_SELECT = """
-    SELECT s.id, s.name, s.nfc_tag, s.at_hand,
-           count(p.id)                 AS paint_count,
-           coalesce(sum(p.quantity), 0) AS pot_count
+    SELECT s.id, s.name, s.nfc_tag, s.at_hand, s.is_default, s.copies_storage_id,
+           c.name                          AS copies_storage_name,
+           count(l.paint_id)               AS paint_count,
+           coalesce(sum(l.quantity), 0)    AS pot_count
     FROM storage s
-    LEFT JOIN paint p ON p.storage_id = s.id
+    LEFT JOIN storage c ON c.id = s.copies_storage_id
+    LEFT JOIN paint_location l ON l.storage_id = s.id
 """
 
 
 def _storage_row(row: sqlite3.Row) -> dict[str, Any]:
     d = dict(row)
     d["at_hand"] = bool(d["at_hand"])
+    d["is_default"] = bool(d["is_default"])
+    d["copies_storage"] = (
+        {"id": d["copies_storage_id"], "name": d["copies_storage_name"]} if d["copies_storage_id"] else None
+    )
+    del d["copies_storage_name"]
     return d
 
 
@@ -58,7 +65,7 @@ def list_storages(conn: sqlite3.Connection, at_hand: bool | None = None) -> list
     if at_hand is not None:
         sql += " WHERE s.at_hand = ?"
         params.append(int(at_hand))
-    sql += " GROUP BY s.id ORDER BY s.at_hand DESC, py_lower(s.name)"
+    sql += " GROUP BY s.id ORDER BY s.is_default DESC, s.at_hand DESC, py_lower(s.name)"
     return [_storage_row(r) for r in conn.execute(sql, params)]
 
 
@@ -67,6 +74,11 @@ def get_storage(conn: sqlite3.Connection, storage_id: int) -> dict:
     if row is None:
         raise NotFound(f"storage {storage_id} not found")
     return _storage_row(row)
+
+
+def default_storage_id(conn: sqlite3.Connection) -> int | None:
+    row = conn.execute("SELECT id FROM storage WHERE is_default = 1").fetchone()
+    return row["id"] if row else None
 
 
 def _check_storage_name_free(conn: sqlite3.Connection, name: str, exclude_id: int | None = None) -> None:
@@ -78,12 +90,30 @@ def _check_storage_name_free(conn: sqlite3.Connection, name: str, exclude_id: in
         raise Conflict(f"storage named '{name}' already exists")
 
 
+def _check_copies_target(conn: sqlite3.Connection, storage_id: int | None, copies_id: int | None) -> None:
+    if copies_id is None:
+        return
+    if copies_id == storage_id:
+        raise InvalidReference("a storage can't be its own copies storage")
+    if conn.execute("SELECT 1 FROM storage WHERE id = ?", (copies_id,)).fetchone() is None:
+        raise InvalidReference(f"storage {copies_id} does not exist")
+
+
 def create_storage(conn: sqlite3.Connection, data: dict) -> dict:
     with conn:
         _check_storage_name_free(conn, data["name"])
+        _check_copies_target(conn, None, data.get("copies_storage_id"))
+        if data.get("is_default"):
+            conn.execute("UPDATE storage SET is_default = 0 WHERE is_default = 1")
         storage_id = conn.execute(
-            "INSERT INTO storage (name, nfc_tag, at_hand) VALUES (?, ?, ?)",
-            (data["name"], data.get("nfc_tag"), int(data.get("at_hand", False))),
+            "INSERT INTO storage (name, nfc_tag, at_hand, is_default, copies_storage_id) VALUES (?, ?, ?, ?, ?)",
+            (
+                data["name"],
+                data.get("nfc_tag"),
+                int(data.get("at_hand", False)),
+                int(bool(data.get("is_default"))),
+                data.get("copies_storage_id"),
+            ),
         ).lastrowid
     return get_storage(conn, storage_id)
 
@@ -98,8 +128,13 @@ def update_storage(conn: sqlite3.Connection, storage_id: int, changes: dict) -> 
                 raise InvalidReference("name must not be empty")
             changes["name"] = changes["name"].strip()
             _check_storage_name_free(conn, changes["name"], exclude_id=storage_id)
-        if "at_hand" in changes:
-            changes["at_hand"] = int(bool(changes["at_hand"]))
+        if "copies_storage_id" in changes:
+            _check_copies_target(conn, storage_id, changes["copies_storage_id"])
+        for flag in ("at_hand", "is_default"):
+            if flag in changes:
+                changes[flag] = int(bool(changes[flag]))
+        if changes.get("is_default"):
+            conn.execute("UPDATE storage SET is_default = 0 WHERE is_default = 1 AND id != ?", (storage_id,))
         sets = ", ".join(f"{col} = ?" for col in changes)
         conn.execute(
             f"UPDATE storage SET {sets}, updated_at = datetime('now') WHERE id = ?",
@@ -109,10 +144,19 @@ def update_storage(conn: sqlite3.Connection, storage_id: int, changes: dict) -> 
 
 
 def delete_storage(conn: sqlite3.Connection, storage_id: int) -> None:
-    """Paints that were inside keep existing, just without a storage."""
+    """Pots that were inside stay in the catalog, without a storage.
+    The default storage can't be deleted — make another one default first."""
+    s = get_storage(conn, storage_id)
+    if s["is_default"]:
+        raise Conflict("the default storage can't be deleted; make another storage default first")
     with conn:
-        if conn.execute("DELETE FROM storage WHERE id = ?", (storage_id,)).rowcount == 0:
-            raise NotFound(f"storage {storage_id} not found")
+        for row in conn.execute(
+            "SELECT paint_id, quantity FROM paint_location WHERE storage_id = ?", (storage_id,)
+        ).fetchall():
+            _change(conn, row["paint_id"], None, row["quantity"])
+        conn.execute("DELETE FROM paint_location WHERE storage_id = ?", (storage_id,))
+        conn.execute("UPDATE storage SET copies_storage_id = NULL WHERE copies_storage_id = ?", (storage_id,))
+        conn.execute("DELETE FROM storage WHERE id = ?", (storage_id,))
 
 
 # ======================= tags =======================
@@ -306,6 +350,23 @@ def _set_tags(conn: sqlite3.Connection, paint_id: int, tag_ids: Iterable[int]) -
     )
 
 
+def _locations(conn: sqlite3.Connection, paint_ids: list[int]) -> dict[int, list[dict]]:
+    placeholders = ",".join("?" * len(paint_ids))
+    result: dict[int, list[dict]] = {}
+    for r in conn.execute(
+        f"""SELECT l.paint_id, l.quantity, s.id, s.name, s.at_hand, s.is_default
+            FROM paint_location l LEFT JOIN storage s ON s.id = l.storage_id
+            WHERE l.paint_id IN ({placeholders})
+            ORDER BY s.id IS NULL, s.is_default DESC, s.at_hand DESC, py_lower(s.name)""",
+        paint_ids,
+    ):
+        storage = None
+        if r["id"] is not None:
+            storage = {"id": r["id"], "name": r["name"], "at_hand": bool(r["at_hand"]), "is_default": bool(r["is_default"])}
+        result.setdefault(r["paint_id"], []).append({"storage": storage, "quantity": r["quantity"]})
+    return result
+
+
 def _assemble_paints(conn: sqlite3.Connection, rows: list[sqlite3.Row]) -> list[dict]:
     if not rows:
         return []
@@ -319,12 +380,11 @@ def _assemble_paints(conn: sqlite3.Connection, rows: list[sqlite3.Row]) -> list[
         ids,
     ):
         tags.setdefault(r["paint_id"], []).append({"id": r["id"], "name": r["name"], "color": r["color"]})
+    locations = _locations(conn, ids)
 
     result = []
     for r in rows:
-        storage = None
-        if r["storage_id"] is not None:
-            storage = {"id": r["storage_id"], "name": r["storage_name"], "at_hand": bool(r["storage_at_hand"])}
+        locs = locations.get(r["id"], [])
         result.append(
             {
                 "id": r["id"],
@@ -334,8 +394,8 @@ def _assemble_paints(conn: sqlite3.Connection, rows: list[sqlite3.Row]) -> list[
                 "code": r["code"],
                 "barcode": r["barcode"],
                 "hex": r["hex"],
-                "quantity": r["quantity"],
-                "storage": storage,
+                "quantity": sum(loc["quantity"] for loc in locs),
+                "locations": locs,
                 "tags": tags.get(r["id"], []),
                 "created_at": r["created_at"],
                 "updated_at": r["updated_at"],
@@ -345,11 +405,12 @@ def _assemble_paints(conn: sqlite3.Connection, rows: list[sqlite3.Row]) -> list[
 
 
 _PAINT_SELECT = """
-    SELECT p.*, m.name AS manufacturer_name, s.name AS storage_name, s.at_hand AS storage_at_hand
+    SELECT p.*, m.name AS manufacturer_name
     FROM paint p
     JOIN manufacturer m ON m.id = p.manufacturer_id
-    LEFT JOIN storage s ON s.id = p.storage_id
 """
+
+_TOTAL = "(SELECT coalesce(sum(quantity), 0) FROM paint_location WHERE paint_id = p.id)"
 
 
 def list_paints(
@@ -379,18 +440,19 @@ def list_paints(
         where.append("py_lower(m.name) = py_lower(?)")
         params.append(manufacturer.strip())
     if no_storage:
-        where.append("p.storage_id IS NULL")
+        where.append("EXISTS (SELECT 1 FROM paint_location l WHERE l.paint_id = p.id AND l.storage_id IS NULL)")
     elif storage_id is not None:
-        where.append("p.storage_id = ?")
+        where.append("EXISTS (SELECT 1 FROM paint_location l WHERE l.paint_id = p.id AND l.storage_id = ?)")
         params.append(storage_id)
     for tag_id in sorted(set(tag_ids or [])):  # all given tags must be present
         where.append("EXISTS (SELECT 1 FROM paint_tag pt WHERE pt.paint_id = p.id AND pt.tag_id = ?)")
         params.append(tag_id)
     if at_hand is not None:
-        where.append("ifnull(s.at_hand, 0) = ?")
-        params.append(int(at_hand))
+        hand = ("EXISTS (SELECT 1 FROM paint_location l JOIN storage s ON s.id = l.storage_id"
+                " WHERE l.paint_id = p.id AND s.at_hand = 1)")
+        where.append(hand if at_hand else f"NOT {hand}")
     if in_stock is not None:
-        where.append("p.quantity > 0" if in_stock else "p.quantity = 0")
+        where.append(f"{_TOTAL} > 0" if in_stock else f"{_TOTAL} = 0")
 
     sql = _PAINT_SELECT
     if where:
@@ -406,44 +468,195 @@ def get_paint(conn: sqlite3.Connection, paint_id: int) -> dict:
     return _assemble_paints(conn, rows)[0]
 
 
-def create_paint(conn: sqlite3.Connection, data: dict) -> dict:
+# ---------- pots: where they lie ----------
+
+AUTO = object()  # "no storage given": use the default storage and its copies rule
+
+
+def _qty(conn: sqlite3.Connection, paint_id: int, storage_id: int | None) -> int:
+    row = conn.execute(
+        "SELECT quantity FROM paint_location WHERE paint_id = ? AND storage_id IS ?", (paint_id, storage_id)
+    ).fetchone()
+    return row["quantity"] if row else 0
+
+
+def _change(conn: sqlite3.Connection, paint_id: int, storage_id: int | None, delta: int) -> None:
+    current = _qty(conn, paint_id, storage_id)
+    new = current + delta
+    if new < 0:
+        raise Conflict("not enough pots there")
+    if current == 0:
+        if new:
+            conn.execute(
+                "INSERT INTO paint_location (paint_id, storage_id, quantity) VALUES (?, ?, ?)",
+                (paint_id, storage_id, new),
+            )
+    elif new == 0:
+        conn.execute("DELETE FROM paint_location WHERE paint_id = ? AND storage_id IS ?", (paint_id, storage_id))
+    else:
+        conn.execute(
+            "UPDATE paint_location SET quantity = ? WHERE paint_id = ? AND storage_id IS ?",
+            (new, paint_id, storage_id),
+        )
+
+
+def _storage_brief(conn: sqlite3.Connection, storage_id: int | None) -> dict | None:
+    if storage_id is None:
+        return None
+    r = conn.execute("SELECT id, name, at_hand FROM storage WHERE id = ?", (storage_id,)).fetchone()
+    return {"id": r["id"], "name": r["name"], "at_hand": bool(r["at_hand"])}
+
+
+def _add_pots(conn: sqlite3.Connection, paint_id: int, count: int, target: Any = AUTO) -> dict:
+    """Put `count` pots of a paint somewhere and say where they went.
+
+    No storage given -> the default storage. If the target storage has a copies
+    storage and already holds this paint, the extra pots go to the copies storage.
+    The answer also lists storages that held this paint while the target didn't
+    (to warn "you already have it in Box 1").
+    """
+    if target is AUTO:
+        target = default_storage_id(conn)
+    else:
+        _check_refs(conn, target, None)
+
+    already_in = []
+    if target is not None and _qty(conn, paint_id, target) == 0:
+        for r in conn.execute(
+            "SELECT storage_id, quantity FROM paint_location WHERE paint_id = ? AND storage_id IS NOT ?",
+            (paint_id, target),
+        ).fetchall():
+            already_in.append({"storage": _storage_brief(conn, r["storage_id"]), "quantity": r["quantity"]})
+
+    copies_to = None
+    if target is not None:
+        row = conn.execute("SELECT copies_storage_id FROM storage WHERE id = ?", (target,)).fetchone()
+        copies_to = row["copies_storage_id"] if row else None
+
+    placed: dict[Any, int] = {}
+    for _ in range(count):
+        dest = target
+        if copies_to is not None and _qty(conn, paint_id, target) >= 1:
+            dest = copies_to
+        _change(conn, paint_id, dest, +1)
+        placed[dest] = placed.get(dest, 0) + 1
+
+    return {
+        "action": "added",
+        "placed": [{"storage": _storage_brief(conn, sid), "count": n} for sid, n in placed.items()],
+        "already_in": already_in,
+    }
+
+
+def add_pots(conn: sqlite3.Connection, paint_id: int, count: int = 1, storage_id: Any = AUTO) -> dict:
+    get_paint(conn, paint_id)
     with conn:
-        _check_refs(conn, data.get("storage_id"), data.get("tag_ids"))
+        notice = _add_pots(conn, paint_id, count, storage_id)
+        conn.execute("UPDATE paint SET updated_at = datetime('now') WHERE id = ?", (paint_id,))
+    return {"paint": get_paint(conn, paint_id), "notice": notice}
+
+
+def remove_pots(conn: sqlite3.Connection, paint_id: int, count: int = 1, storage_id: Any = AUTO) -> dict:
+    """Take pots away (used up). Without a storage: from the default storage first,
+    then other "at hand" ones, then the rest. If an "at hand" storage runs out while
+    pots are left elsewhere, the answer offers where to take one from."""
+    paint = get_paint(conn, paint_id)
+    if count > paint["quantity"]:
+        raise Conflict("there are fewer pots than that")
+    with conn:
+        taken: dict[Any, int] = {}
+        if storage_id is AUTO:
+            for loc in paint["locations"]:  # already ordered: default, at hand, others, no storage
+                if count == 0:
+                    break
+                sid = loc["storage"]["id"] if loc["storage"] else None
+                n = min(count, loc["quantity"])
+                _change(conn, paint_id, sid, -n)
+                taken[sid] = n
+                count -= n
+        else:
+            if _qty(conn, paint_id, storage_id) < count:
+                raise Conflict("not enough pots in that storage")
+            _change(conn, paint_id, storage_id, -count)
+            taken[storage_id] = count
+        conn.execute("UPDATE paint SET updated_at = datetime('now') WHERE id = ?", (paint_id,))
+
+    paint = get_paint(conn, paint_id)
+    refill_from = []
+    emptied_hand = [sid for sid in taken if sid is not None and _storage_brief(conn, sid)["at_hand"]
+                    and _qty(conn, paint_id, sid) == 0]
+    if emptied_hand:
+        refill_from = [loc for loc in paint["locations"] if not (loc["storage"] and loc["storage"]["at_hand"])]
+    return {
+        "paint": paint,
+        "notice": {
+            "action": "removed",
+            "taken": [{"storage": _storage_brief(conn, sid), "count": n} for sid, n in taken.items()],
+            "emptied": [_storage_brief(conn, sid) for sid in emptied_hand],
+            "refill_from": refill_from,
+        },
+    }
+
+
+def move_pots(conn: sqlite3.Connection, paint_id: int, from_storage_id: int | None,
+              to_storage_id: int | None, count: int = 1) -> dict:
+    """Move pots between storages as asked — the copies rule doesn't apply here."""
+    get_paint(conn, paint_id)
+    if from_storage_id == to_storage_id:
+        raise InvalidReference("from and to are the same")
+    _check_refs(conn, to_storage_id, None)
+    with conn:
+        if _qty(conn, paint_id, from_storage_id) < count:
+            raise Conflict("not enough pots in that storage")
+        _change(conn, paint_id, from_storage_id, -count)
+        _change(conn, paint_id, to_storage_id, +count)
+        conn.execute("UPDATE paint SET updated_at = datetime('now') WHERE id = ?", (paint_id,))
+    return {
+        "paint": get_paint(conn, paint_id),
+        "notice": {
+            "action": "moved",
+            "from": _storage_brief(conn, from_storage_id),
+            "to": _storage_brief(conn, to_storage_id),
+            "count": count,
+        },
+    }
+
+
+# ---------- create / update / delete ----------
+
+def create_paint(conn: sqlite3.Connection, data: dict, storage_id: Any = AUTO) -> dict:
+    """`storage_id` AUTO puts the pots by the default/copies rule; an explicit id
+    (or None for "no storage") puts all of them there."""
+    with conn:
+        _check_refs(conn, None if storage_id is AUTO else storage_id, data.get("tag_ids"))
         manufacturer_id = _resolve_manufacturer(conn, data.get("manufacturer_id"), data.get("manufacturer"))
         _check_paint_unique(conn, manufacturer_id, data["name"], data.get("code"))
         _check_barcode_free(conn, data.get("barcode"))
         paint_id = conn.execute(
-            """INSERT INTO paint (name, manufacturer_id, code, barcode, hex, quantity, storage_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (
-                data["name"],
-                manufacturer_id,
-                data.get("code"),
-                data.get("barcode"),
-                data.get("hex"),
-                data.get("quantity", 1),
-                data.get("storage_id"),
-            ),
+            """INSERT INTO paint (name, manufacturer_id, code, barcode, hex) VALUES (?, ?, ?, ?, ?)""",
+            (data["name"], manufacturer_id, data.get("code"), data.get("barcode"), data.get("hex")),
         ).lastrowid
         _set_tags(conn, paint_id, data.get("tag_ids") or [])
-    return get_paint(conn, paint_id)
+        notice = None
+        quantity = data.get("quantity", 1)
+        if quantity:
+            notice = _add_pots(conn, paint_id, quantity, storage_id)
+    return {**get_paint(conn, paint_id), "notice": notice}
 
 
 def update_paint(conn: sqlite3.Connection, paint_id: int, changes: dict) -> dict:
+    """Name, manufacturer, code, barcode, color, tags. Pots change via add/remove/move."""
     current = get_paint(conn, paint_id)
-    for field in ("name", "quantity"):
-        if field in changes and changes[field] is None:
-            raise InvalidReference(f"{field} cannot be empty")
     if "name" in changes:
-        changes["name"] = changes["name"].strip()
-        if not changes["name"]:
+        if changes["name"] is None or not changes["name"].strip():
             raise InvalidReference("name cannot be empty")
+        changes["name"] = changes["name"].strip()
 
     tag_ids = changes.pop("tag_ids", None)
     manufacturer_id = changes.pop("manufacturer_id", None)
     manufacturer_name = changes.pop("manufacturer", None)
     with conn:
-        _check_refs(conn, changes.get("storage_id"), tag_ids)
+        _check_refs(conn, None, tag_ids)
         if manufacturer_id is not None or manufacturer_name is not None:
             changes["manufacturer_id"] = _resolve_manufacturer(conn, manufacturer_id, manufacturer_name)
         if {"name", "manufacturer_id", "code"} & changes.keys():

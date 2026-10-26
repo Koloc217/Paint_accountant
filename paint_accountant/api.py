@@ -15,6 +15,10 @@ from .netinfo import lan_url
 from .schemas import (
     Manufacturer,
     ManufacturerIn,
+    MoveIn,
+    PaintCreated,
+    PotsIn,
+    PotsResult,
     Paint,
     PaintIn,
     PaintPatch,
@@ -92,10 +96,43 @@ def list_paints(
     )
 
 
-@router.post("/paints", response_model=Paint, status_code=201, tags=["paints"])
+def _target(body) -> object:
+    """storage_id left out -> automatic placement; given (even null) -> exactly there."""
+    return body.storage_id if "storage_id" in body.model_fields_set else repo.AUTO
+
+
+@router.post("/paints", response_model=PaintCreated, status_code=201, tags=["paints"])
 def create_paint(body: PaintIn, conn: sqlite3.Connection = Conn):
     try:
-        return repo.create_paint(conn, body.model_dump())
+        return repo.create_paint(conn, body.model_dump(exclude={"storage_id"}), _target(body))
+    except _DOMAIN_ERRORS as exc:
+        raise _translate(exc)
+
+
+@router.post("/paints/{paint_id}/add", response_model=PotsResult, tags=["pots"])
+def add_pots(paint_id: int, body: PotsIn = PotsIn(), conn: sqlite3.Connection = Conn):
+    """Add pots. Without storage_id they go to the default storage; if that storage
+    already has this paint and has a copies storage, they go there instead."""
+    try:
+        return repo.add_pots(conn, paint_id, body.count, _target(body))
+    except _DOMAIN_ERRORS as exc:
+        raise _translate(exc)
+
+
+@router.post("/paints/{paint_id}/remove", response_model=PotsResult, tags=["pots"])
+def remove_pots(paint_id: int, body: PotsIn = PotsIn(), conn: sqlite3.Connection = Conn):
+    """A pot is used up. Without storage_id it's taken from "at hand" first."""
+    try:
+        return repo.remove_pots(conn, paint_id, body.count, _target(body))
+    except _DOMAIN_ERRORS as exc:
+        raise _translate(exc)
+
+
+@router.post("/paints/{paint_id}/move", response_model=PotsResult, tags=["pots"])
+def move_pots(paint_id: int, body: MoveIn, conn: sqlite3.Connection = Conn):
+    """Move pots from one storage to another (null = without a storage)."""
+    try:
+        return repo.move_pots(conn, paint_id, body.from_storage_id, body.to_storage_id, body.count)
     except _DOMAIN_ERRORS as exc:
         raise _translate(exc)
 

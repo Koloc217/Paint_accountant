@@ -38,6 +38,8 @@ class StorageIn(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     nfc_tag: str | None = None
     at_hand: bool = False
+    is_default: bool = False
+    copies_storage_id: int | None = None
 
     _strip = field_validator("nfc_tag")(_strip_or_none)
 
@@ -51,11 +53,21 @@ class StorageIn(BaseModel):
 
 
 class StoragePatch(BaseModel):
+    """Only sent fields change. is_default=true makes this the default storage
+    (the previous default stops being one). copies_storage_id=null turns the copies rule off."""
+
     name: str | None = Field(default=None, min_length=1, max_length=100)
     nfc_tag: str | None = None
     at_hand: bool | None = None
+    is_default: bool | None = None
+    copies_storage_id: int | None = None
 
     _strip = field_validator("nfc_tag")(_strip_or_none)
+
+
+class StorageName(BaseModel):
+    id: int
+    name: str
 
 
 class Storage(BaseModel):
@@ -63,6 +75,8 @@ class Storage(BaseModel):
     name: str
     nfc_tag: str | None
     at_hand: bool
+    is_default: bool = False
+    copies_storage: StorageName | None = None
     paint_count: int = 0
     pot_count: int = 0
 
@@ -127,7 +141,11 @@ class PaintIn(BaseModel):
     barcode: str | None = Field(default=None, max_length=100)
     hex: str | None = None
     quantity: int = Field(default=1, ge=0)
-    storage_id: int | None = None
+    storage_id: int | None = Field(
+        default=None,
+        description="leave out to use the default storage (and its copies rule); "
+        "give an id to put all pots there; null = without a storage",
+    )
     tag_ids: list[int] = []
 
     _strip_code = field_validator("code", "barcode")(_strip_or_none)
@@ -157,8 +175,6 @@ class PaintPatch(BaseModel):
     code: str | None = Field(default=None, max_length=50)
     barcode: str | None = Field(default=None, max_length=100)
     hex: str | None = None
-    quantity: int | None = Field(default=None, ge=0)
-    storage_id: int | None = None
     tag_ids: list[int] | None = None
 
     _strip_code = field_validator("code", "barcode")(_strip_or_none)
@@ -169,6 +185,12 @@ class StorageRef(BaseModel):
     id: int
     name: str
     at_hand: bool
+    is_default: bool = False
+
+
+class Location(BaseModel):
+    storage: StorageRef | None  # null = without a storage
+    quantity: int
 
 
 class TagRef(BaseModel):
@@ -185,8 +207,34 @@ class Paint(BaseModel):
     code: str | None
     barcode: str | None
     hex: str | None
-    quantity: int
-    storage: StorageRef | None
+    quantity: int = Field(description="pots in all storages")
+    locations: list[Location]
     tags: list[TagRef]
     created_at: str
     updated_at: str
+
+
+class PaintCreated(Paint):
+    notice: dict | None = Field(None, description="where the pots went, and storages already holding this paint")
+
+
+# ---------- pots ----------
+
+class PotsIn(BaseModel):
+    count: int = Field(default=1, ge=1, le=100)
+    storage_id: int | None = Field(
+        default=None,
+        description="leave out: adding goes to the default storage (copies rule applies), "
+        "removing takes from 'at hand' first; give an id (or null = without storage) to use that one",
+    )
+
+
+class MoveIn(BaseModel):
+    from_storage_id: int | None
+    to_storage_id: int | None
+    count: int = Field(default=1, ge=1, le=100)
+
+
+class PotsResult(BaseModel):
+    paint: Paint
+    notice: dict

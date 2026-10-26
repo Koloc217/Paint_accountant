@@ -39,12 +39,12 @@ def test_paint_crud_and_hex_normalization(client):
     p = _paint(client, hex="C01", code=" 21-03 ")
     assert p["hex"] == "#cc0011"
     assert p["code"] == "21-03"
-    assert p["quantity"] == 1
-    assert p["storage"] is None and p["tags"] == []
+    assert p["quantity"] == 1 and p["tags"] == []
+    assert [loc["storage"]["name"] for loc in p["locations"]] == ["Под рукой"]  # default storage
 
-    r = client.patch(f"/api/paints/{p['id']}", json={"quantity": 0, "hex": None})
+    r = client.patch(f"/api/paints/{p['id']}", json={"hex": None})
     assert r.status_code == 200
-    assert r.json()["quantity"] == 0 and r.json()["hex"] is None
+    assert r.json()["hex"] is None
     assert r.json()["code"] == "21-03"  # untouched field stays
 
     assert client.delete(f"/api/paints/{p['id']}").status_code == 204
@@ -75,27 +75,28 @@ def test_search_and_filters(client):
     tags = {t["name"]: t["id"] for t in client.get("/api/tags").json()}
 
     a = _paint(client, name="Nuln Oil", storage_id=box["id"], tag_ids=[tags["Проливка"]])
-    b = _paint(client, name="Black Templar", storage_id=desk["id"], tag_ids=[tags["Контраст"]], quantity=0)
-    c = _paint(client, name="Зелёная тень", manufacturer="Kimera")
+    b = _paint(client, name="Black Templar", storage_id=desk["id"], tag_ids=[tags["Контраст"]])
+    c = _paint(client, name="Зелёная тень", manufacturer="Kimera", storage_id=None)
+    d = _paint(client, name="Abaddon Black", quantity=0)
 
     ids = lambda r: {p["id"] for p in r.json()}  # noqa: E731
     assert ids(client.get("/api/paints", params={"q": "nuln"})) == {a["id"]}
     assert ids(client.get("/api/paints", params={"q": "ЗЕЛЁН"})) == {c["id"]}
-    assert ids(client.get("/api/paints", params={"q": "citadel"})) == {a["id"], b["id"]}
+    assert ids(client.get("/api/paints", params={"q": "citadel"})) == {a["id"], b["id"], d["id"]}
     assert ids(client.get("/api/paints", params={"storage_id": box["id"]})) == {a["id"]}
     assert ids(client.get("/api/paints", params={"no_storage": True})) == {c["id"]}
     assert ids(client.get("/api/paints", params={"at_hand": True})) == {b["id"]}
-    assert ids(client.get("/api/paints", params={"in_stock": False})) == {b["id"]}
+    assert ids(client.get("/api/paints", params={"in_stock": False})) == {d["id"]}
     assert ids(client.get("/api/paints", params={"tag_id": tags["Проливка"]})) == {a["id"]}
     assert ids(client.get("/api/paints", params=[("tag_id", tags["Проливка"]), ("tag_id", tags["Контраст"])])) == set()
     assert ids(client.get("/api/paints", params={"q": "%"})) == set()  # LIKE wildcards are escaped
 
     makers = {m["name"]: m["paint_count"] for m in client.get("/api/manufacturers").json()}
-    assert makers["Citadel"] == 2 and makers["Kimera"] == 1 and makers["Tamiya"] == 0
+    assert makers["Citadel"] == 3 and makers["Kimera"] == 1 and makers["Tamiya"] == 0
     assert [m["name"] for m in client.get("/api/manufacturers", params={"q": "kim"}).json()] == ["Kimera"]
     kimera = next(m["id"] for m in client.get("/api/manufacturers").json() if m["name"] == "Kimera")
     assert ids(client.get("/api/paints", params={"manufacturer_id": kimera})) == {c["id"]}
-    assert ids(client.get("/api/paints", params={"manufacturer": "citadel"})) == {a["id"], b["id"]}
+    assert ids(client.get("/api/paints", params={"manufacturer": "citadel"})) == {a["id"], b["id"], d["id"]}
 
 
 def test_storages(client):
@@ -109,11 +110,12 @@ def test_storages(client):
 
     r = client.patch(f"/api/storages/{s['id']}", json={"at_hand": True, "name": "Органайзер"})
     assert r.json()["at_hand"] is True and r.json()["name"] == "Органайзер"
-    assert client.get(f"/api/paints/{p['id']}").json()["storage"]["at_hand"] is True
+    assert client.get(f"/api/paints/{p['id']}").json()["locations"][0]["storage"]["at_hand"] is True
 
-    # deleting a storage keeps its paints, they just lose the storage
+    # deleting a storage keeps its pots, they just lose the storage
     assert client.delete(f"/api/storages/{s['id']}").status_code == 204
-    assert client.get(f"/api/paints/{p['id']}").json()["storage"] is None
+    locs = client.get(f"/api/paints/{p['id']}").json()["locations"]
+    assert locs == [{"storage": None, "quantity": 3}]
 
 
 def test_tags_crud_and_paint_tags(client):
