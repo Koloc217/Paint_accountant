@@ -22,7 +22,7 @@ def _paint(client, **kw):
 
 
 def test_health_and_starter_tags(client):
-    assert client.get("/api/health").json() == {"status": "ok", "schema_version": 1}
+    assert client.get("/api/health").json() == {"status": "ok", "schema_version": 2}
     tags = client.get("/api/tags").json()
     names = [t["name"] for t in tags]
     assert "Проливка" in names and "Контраст" in names
@@ -89,8 +89,12 @@ def test_search_and_filters(client):
     assert ids(client.get("/api/paints", params=[("tag_id", tags["Проливка"]), ("tag_id", tags["Контраст"])])) == set()
     assert ids(client.get("/api/paints", params={"q": "%"})) == set()  # LIKE wildcards are escaped
 
-    assert client.get("/api/manufacturers").json() == ["Citadel", "Kimera"]
-    assert client.get("/api/manufacturers", params={"q": "kim"}).json() == ["Kimera"]
+    makers = {m["name"]: m["paint_count"] for m in client.get("/api/manufacturers").json()}
+    assert makers["Citadel"] == 2 and makers["Kimera"] == 1 and makers["Tamiya"] == 0
+    assert [m["name"] for m in client.get("/api/manufacturers", params={"q": "kim"}).json()] == ["Kimera"]
+    kimera = next(m["id"] for m in client.get("/api/manufacturers").json() if m["name"] == "Kimera")
+    assert ids(client.get("/api/paints", params={"manufacturer_id": kimera})) == {c["id"]}
+    assert ids(client.get("/api/paints", params={"manufacturer": "citadel"})) == {a["id"], b["id"]}
 
 
 def test_storages(client):
@@ -133,3 +137,47 @@ def test_reopen_keeps_data(tmp_path):
     with TestClient(create_app(settings)) as c:
         assert len(c.get("/api/paints").json()) == 1
         assert len(c.get("/api/tags").json()) == 10  # starter tags not duplicated
+
+
+def test_starter_manufacturers(client):
+    names = [m["name"] for m in client.get("/api/manufacturers").json()]
+    assert names == ["AK", "Citadel", "Green Stuff World", "Kaleido", "Kimera", "Tamiya", "Vallejo"]
+
+
+def test_paint_by_manufacturer_id_or_name(client):
+    vallejo = next(m for m in client.get("/api/manufacturers").json() if m["name"] == "Vallejo")
+    p = _paint(client, manufacturer=None, manufacturer_id=vallejo["id"], name="Dead White")
+    assert p["manufacturer"] == "Vallejo" and p["manufacturer_id"] == vallejo["id"]
+
+    # name matches an existing manufacturer ignoring case — no duplicate created
+    p2 = _paint(client, manufacturer="vallejo", name="Black")
+    assert p2["manufacturer_id"] == vallejo["id"]
+
+    # a new name is added to the list
+    p3 = _paint(client, manufacturer="Scale75", name="Black Rock")
+    assert "Scale75" in [m["name"] for m in client.get("/api/manufacturers").json()]
+
+    # moving a paint to another manufacturer
+    ak = next(m for m in client.get("/api/manufacturers").json() if m["name"] == "AK")
+    moved = client.patch(f"/api/paints/{p3['id']}", json={"manufacturer_id": ak["id"]}).json()
+    assert moved["manufacturer"] == "AK"
+
+    assert client.post("/api/paints", json={"name": "X"}).status_code == 422
+    assert client.post("/api/paints", json={"name": "X", "manufacturer_id": 999}).status_code == 422
+
+
+def test_manufacturer_crud(client):
+    m = client.post("/api/manufacturers", json={"name": " Army Painter "}).json()
+    assert m["name"] == "Army Painter" and m["paint_count"] == 0
+    assert client.post("/api/manufacturers", json={"name": "army painter"}).status_code == 409
+    assert client.post("/api/manufacturers", json={"name": "  "}).status_code == 422
+
+    r = client.patch(f"/api/manufacturers/{m['id']}", json={"name": "The Army Painter"})
+    assert r.json()["name"] == "The Army Painter"
+    assert client.patch(f"/api/manufacturers/{m['id']}", json={"name": "citadel"}).status_code == 409
+
+    p = _paint(client, manufacturer=None, manufacturer_id=m["id"], name="Matt Black")
+    assert client.delete(f"/api/manufacturers/{m['id']}").status_code == 409  # still has paints
+    client.delete(f"/api/paints/{p['id']}")
+    assert client.delete(f"/api/manufacturers/{m['id']}").status_code == 204
+    assert client.delete(f"/api/manufacturers/{m['id']}").status_code == 404

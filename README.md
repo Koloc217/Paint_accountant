@@ -58,9 +58,9 @@ pytest
 
 ## Web UI
 
-- **Краски** — list with color swatches, search, filters by storage, tags, "at hand" and stock; quick +/− for the number of pots; add, edit, delete
+- **Краски** — list with color swatches, search, filters by storage, manufacturer, tags, "at hand" and stock; quick +/− for the number of pots; add, edit, delete; manufacturer picked from a list, a new one can be added right in the form
 - **Хранилища** — boxes and drawers with paint and pot counts; each storage has a short link `http://<address>:8642/storage/<id>` to write into an NFC tag or a QR code
-- **Теги** — rename, recolor, add, delete
+- **Справочники** — manufacturers (rename, add, delete unused ones) and tags (rename, recolor, add, delete). Starter manufacturers: AK, Citadel, Green Stuff World, Kaleido, Kimera, Tamiya, Vallejo
 
 No build step and no external libraries — plain HTML, CSS and JavaScript in `paint_accountant/web/`, so it works on a home network without internet.
 
@@ -68,10 +68,11 @@ No build step and no external libraries — plain HTML, CSS and JavaScript in `p
 
 | Method | Path | What it does |
 |---|---|---|
-| GET | `/api/paints` | list paints; filters: `q`, `manufacturer`, `storage_id`, `no_storage`, `tag_id` (repeatable), `at_hand`, `in_stock` |
-| POST | `/api/paints` | add a paint |
+| GET | `/api/paints` | list paints; filters: `q`, `manufacturer_id` or `manufacturer` (name), `storage_id`, `no_storage`, `tag_id` (repeatable), `at_hand`, `in_stock` |
+| POST | `/api/paints` | add a paint; give `manufacturer_id`, or `manufacturer` by name (a new name is added to the list) |
 | GET / PATCH / DELETE | `/api/paints/{id}` | read, change, delete a paint |
-| GET | `/api/manufacturers` | manufacturer names for autocomplete, `q` to filter |
+| GET / POST | `/api/manufacturers` | list (with paint counts, `q` to filter) / add manufacturers |
+| PATCH / DELETE | `/api/manufacturers/{id}` | rename; delete only works when no paints use it |
 | GET / POST | `/api/storages` | list (with paint and pot counts) / add storages |
 | GET / PATCH / DELETE | `/api/storages/{id}` | deleting a storage keeps its paints, without a storage |
 | GET / POST | `/api/tags` | list / add tags |

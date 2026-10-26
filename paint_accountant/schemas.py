@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 _HEX_RE = re.compile(r"^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 
@@ -96,11 +96,33 @@ class Tag(BaseModel):
     keywords: list[str] = []
 
 
-# ---------- paints ----------
+# ---------- manufacturers ----------
+
+class ManufacturerIn(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("name must not be empty")
+        return v
+
+
+class Manufacturer(BaseModel):
+    id: int
+    name: str
+    paint_count: int = 0
+
 
 class PaintIn(BaseModel):
+    """Give the manufacturer either by id (from /api/manufacturers) or by name;
+    an unknown name is added to the manufacturer list."""
+
     name: str = Field(min_length=1, max_length=200)
-    manufacturer: str = Field(min_length=1, max_length=100)
+    manufacturer_id: int | None = None
+    manufacturer: str | None = Field(default=None, max_length=100)
     code: str | None = Field(default=None, max_length=50)
     hex: str | None = None
     quantity: int = Field(default=1, ge=0)
@@ -110,7 +132,7 @@ class PaintIn(BaseModel):
     _strip_code = field_validator("code")(_strip_or_none)
     _hex = field_validator("hex")(normalize_hex)
 
-    @field_validator("name", "manufacturer")
+    @field_validator("name")
     @classmethod
     def _required_text(cls, v: str) -> str:
         v = v.strip()
@@ -118,11 +140,18 @@ class PaintIn(BaseModel):
             raise ValueError("must not be empty")
         return v
 
+    @model_validator(mode="after")
+    def _need_manufacturer(self) -> "PaintIn":
+        if self.manufacturer_id is None and not (self.manufacturer or "").strip():
+            raise ValueError("give manufacturer_id or manufacturer")
+        return self
+
 
 class PaintPatch(BaseModel):
     """Only the fields that are sent get changed. Send null to clear an optional field."""
 
     name: str | None = Field(default=None, min_length=1, max_length=200)
+    manufacturer_id: int | None = None
     manufacturer: str | None = Field(default=None, min_length=1, max_length=100)
     code: str | None = Field(default=None, max_length=50)
     hex: str | None = None
@@ -150,6 +179,7 @@ class Paint(BaseModel):
     id: int
     name: str
     manufacturer: str
+    manufacturer_id: int
     code: str | None
     hex: str | None
     quantity: int

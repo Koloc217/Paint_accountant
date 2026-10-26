@@ -12,6 +12,8 @@ from . import __version__
 from .db import connect
 from .netinfo import lan_url
 from .schemas import (
+    Manufacturer,
+    ManufacturerIn,
     Paint,
     PaintIn,
     PaintPatch,
@@ -67,7 +69,8 @@ def info(request: Request) -> dict:
 @router.get("/paints", response_model=list[Paint], tags=["paints"])
 def list_paints(
     q: str | None = Query(None, description="search in name, manufacturer and code"),
-    manufacturer: str | None = None,
+    manufacturer: str | None = Query(None, description="manufacturer name"),
+    manufacturer_id: int | None = None,
     storage_id: int | None = None,
     no_storage: bool = Query(False, description="only paints without a storage"),
     tag_id: list[int] = Query([], description="repeat to require several tags"),
@@ -79,6 +82,7 @@ def list_paints(
         conn,
         q=q,
         manufacturer=manufacturer,
+        manufacturer_id=manufacturer_id,
         storage_id=storage_id,
         no_storage=no_storage,
         tag_ids=tag_id,
@@ -120,9 +124,37 @@ def delete_paint(paint_id: int, conn: sqlite3.Connection = Conn):
     return Response(status_code=204)
 
 
-@router.get("/manufacturers", response_model=list[str], tags=["paints"])
+# ---------------- manufacturers ----------------
+
+@router.get("/manufacturers", response_model=list[Manufacturer], tags=["manufacturers"])
 def list_manufacturers(q: str | None = None, conn: sqlite3.Connection = Conn):
     return repo.list_manufacturers(conn, q)
+
+
+@router.post("/manufacturers", response_model=Manufacturer, status_code=201, tags=["manufacturers"])
+def create_manufacturer(body: ManufacturerIn, conn: sqlite3.Connection = Conn):
+    try:
+        return repo.create_manufacturer(conn, body.model_dump())
+    except _DOMAIN_ERRORS as exc:
+        raise _translate(exc)
+
+
+@router.patch("/manufacturers/{manufacturer_id}", response_model=Manufacturer, tags=["manufacturers"])
+def update_manufacturer(manufacturer_id: int, body: ManufacturerIn, conn: sqlite3.Connection = Conn):
+    try:
+        return repo.update_manufacturer(conn, manufacturer_id, body.model_dump())
+    except _DOMAIN_ERRORS as exc:
+        raise _translate(exc)
+
+
+@router.delete("/manufacturers/{manufacturer_id}", status_code=204, tags=["manufacturers"])
+def delete_manufacturer(manufacturer_id: int, conn: sqlite3.Connection = Conn):
+    """Only a manufacturer without paints can be deleted (409 otherwise)."""
+    try:
+        repo.delete_manufacturer(conn, manufacturer_id)
+    except _DOMAIN_ERRORS as exc:
+        raise _translate(exc)
+    return Response(status_code=204)
 
 
 # ---------------- storages ----------------

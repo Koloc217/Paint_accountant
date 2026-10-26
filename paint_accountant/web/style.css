@@ -35,6 +35,8 @@
 
 * { box-sizing: border-box; }
 
+[hidden] { display: none !important; }
+
 html { -webkit-text-size-adjust: 100%; }
 
 body {
@@ -294,8 +296,8 @@ select.input { appearance: none; padding-right: 32px; background-image: linear-g
 
 .filters { display: grid; gap: 8px; margin-bottom: 8px; }
 
-.filter-row { display: flex; gap: 8px; }
-.filter-row > select { flex: 1 1 0; min-width: 0; }
+.filter-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.filter-row > select { flex: 1 1 150px; min-width: 0; }
 
 .chips-scroll {
   display: flex;

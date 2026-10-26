@@ -62,6 +62,47 @@ MIGRATIONS: list[str] = [
         PRIMARY KEY (keyword, tag_id)
     );
     """,
+    # 2 — manufacturers become their own table; paint.manufacturer (text)
+    #     is replaced by paint.manufacturer_id. Existing names are kept.
+    """
+    CREATE TABLE manufacturer (
+        id         INTEGER PRIMARY KEY,
+        name       TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE UNIQUE INDEX manufacturer_name_uq ON manufacturer (name COLLATE NOCASE);
+
+    INSERT INTO manufacturer (name) VALUES
+        ('AK'), ('Citadel'), ('Green Stuff World'), ('Kaleido'),
+        ('Kimera'), ('Tamiya'), ('Vallejo');
+
+    -- names already used by paints, one row per name ignoring case
+    INSERT INTO manufacturer (name)
+        SELECT min(trim(manufacturer)) FROM paint
+        WHERE py_lower(trim(manufacturer)) NOT IN (SELECT py_lower(name) FROM manufacturer)
+        GROUP BY py_lower(trim(manufacturer));
+
+    CREATE TABLE paint_new (
+        id              INTEGER PRIMARY KEY,
+        name            TEXT    NOT NULL,
+        manufacturer_id INTEGER NOT NULL REFERENCES manufacturer (id) ON DELETE RESTRICT,
+        code            TEXT,
+        hex             TEXT    CHECK (hex IS NULL OR hex GLOB '#[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]'),
+        quantity        INTEGER NOT NULL DEFAULT 1 CHECK (quantity >= 0),
+        storage_id      INTEGER REFERENCES storage (id) ON DELETE SET NULL,
+        created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+        updated_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+    INSERT INTO paint_new (id, name, manufacturer_id, code, hex, quantity, storage_id, created_at, updated_at)
+        SELECT p.id, p.name, m.id, p.code, p.hex, p.quantity, p.storage_id, p.created_at, p.updated_at
+        FROM paint p JOIN manufacturer m ON py_lower(m.name) = py_lower(trim(p.manufacturer));
+    DROP TABLE paint;
+    ALTER TABLE paint_new RENAME TO paint;
+
+    CREATE UNIQUE INDEX paint_identity_uq ON paint (manufacturer_id, name COLLATE NOCASE, ifnull(code, ''));
+    CREATE INDEX paint_storage_ix ON paint (storage_id);
+    CREATE INDEX paint_manufacturer_ix ON paint (manufacturer_id);
+    """,
 ]
 
 # Starter tags: (name, plaque color, label keywords)
@@ -94,11 +135,28 @@ def init_db(db_path: Path) -> None:
     try:
         conn.execute("PRAGMA journal_mode = WAL")
         version = conn.execute("PRAGMA user_version").fetchone()[0]
+        if version > len(MIGRATIONS):
+            raise RuntimeError(
+                f"Database {db_path} is from a newer version of the app "
+                f"(schema {version}, this app knows {len(MIGRATIONS)}). Update the app."
+            )
+        if version == len(MIGRATIONS):
+            return
+        # Rebuilding a table (DROP + RENAME) with foreign keys on would cascade-delete
+        # rows that point to it, so they are off while migrating and checked afterwards.
+        conn.execute("PRAGMA foreign_keys = OFF")
         for number, script in enumerate(MIGRATIONS[version:], start=version + 1):
-            with conn:
+            try:
                 conn.executescript(f"BEGIN; {script} PRAGMA user_version = {number}; COMMIT;")
+            except Exception:
+                if conn.in_transaction:
+                    conn.rollback()
+                raise
             if number == 1:
                 _seed_tags(conn)
+        problems = conn.execute("PRAGMA foreign_key_check").fetchall()
+        if problems:
+            raise RuntimeError(f"Database migration left broken references: {[tuple(r) for r in problems]}")
     finally:
         conn.close()
 

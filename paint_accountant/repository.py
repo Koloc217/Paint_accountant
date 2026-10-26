@@ -173,6 +173,83 @@ def delete_tag(conn: sqlite3.Connection, tag_id: int) -> None:
             raise NotFound(f"tag {tag_id} not found")
 
 
+# ======================= manufacturers =======================
+
+_MANUFACTURER_SELECT = """
+    SELECT m.id, m.name, count(p.id) AS paint_count
+    FROM manufacturer m
+    LEFT JOIN paint p ON p.manufacturer_id = m.id
+"""
+
+
+def list_manufacturers(conn: sqlite3.Connection, q: str | None = None) -> list[dict]:
+    sql = _MANUFACTURER_SELECT
+    params: list[Any] = []
+    if q and q.strip():
+        sql += " WHERE py_lower(m.name) LIKE ? ESCAPE '\\'"
+        params.append(_like_pattern(q.strip()))
+    sql += " GROUP BY m.id ORDER BY py_lower(m.name)"
+    return [dict(r) for r in conn.execute(sql, params)]
+
+
+def get_manufacturer(conn: sqlite3.Connection, manufacturer_id: int) -> dict:
+    row = conn.execute(_MANUFACTURER_SELECT + " WHERE m.id = ? GROUP BY m.id", (manufacturer_id,)).fetchone()
+    if row is None:
+        raise NotFound(f"manufacturer {manufacturer_id} not found")
+    return dict(row)
+
+
+def _find_manufacturer(conn: sqlite3.Connection, name: str, exclude_id: int | None = None) -> int | None:
+    row = conn.execute(
+        "SELECT id FROM manufacturer WHERE py_lower(name) = py_lower(?) AND id IS NOT ?",
+        (name.strip(), exclude_id),
+    ).fetchone()
+    return row["id"] if row else None
+
+
+def create_manufacturer(conn: sqlite3.Connection, data: dict) -> dict:
+    name = data["name"].strip()
+    with conn:
+        if _find_manufacturer(conn, name) is not None:
+            raise Conflict(f"manufacturer '{name}' already exists")
+        manufacturer_id = conn.execute("INSERT INTO manufacturer (name) VALUES (?)", (name,)).lastrowid
+    return get_manufacturer(conn, manufacturer_id)
+
+
+def update_manufacturer(conn: sqlite3.Connection, manufacturer_id: int, changes: dict) -> dict:
+    get_manufacturer(conn, manufacturer_id)
+    name = (changes.get("name") or "").strip()
+    if name:
+        with conn:
+            if _find_manufacturer(conn, name, exclude_id=manufacturer_id) is not None:
+                raise Conflict(f"manufacturer '{name}' already exists")
+            conn.execute("UPDATE manufacturer SET name = ? WHERE id = ?", (name, manufacturer_id))
+    return get_manufacturer(conn, manufacturer_id)
+
+
+def delete_manufacturer(conn: sqlite3.Connection, manufacturer_id: int) -> None:
+    m = get_manufacturer(conn, manufacturer_id)
+    if m["paint_count"]:
+        raise Conflict(f"manufacturer '{m['name']}' still has {m['paint_count']} paints")
+    with conn:
+        conn.execute("DELETE FROM manufacturer WHERE id = ?", (manufacturer_id,))
+
+
+def _resolve_manufacturer(conn: sqlite3.Connection, manufacturer_id: int | None, name: str | None) -> int:
+    """By id (must exist) or by name (found ignoring case, created if new)."""
+    if manufacturer_id is not None:
+        if conn.execute("SELECT 1 FROM manufacturer WHERE id = ?", (manufacturer_id,)).fetchone() is None:
+            raise InvalidReference(f"manufacturer {manufacturer_id} does not exist")
+        return manufacturer_id
+    name = (name or "").strip()
+    if not name:
+        raise InvalidReference("manufacturer is required")
+    found = _find_manufacturer(conn, name)
+    if found is not None:
+        return found
+    return conn.execute("INSERT INTO manufacturer (name) VALUES (?)", (name,)).lastrowid
+
+
 # ======================= paints =======================
 
 def _check_refs(conn: sqlite3.Connection, storage_id: int | None, tag_ids: Iterable[int] | None) -> None:
@@ -189,20 +266,20 @@ def _check_refs(conn: sqlite3.Connection, storage_id: int | None, tag_ids: Itera
 
 
 def _check_paint_unique(
-    conn: sqlite3.Connection, manufacturer: str, name: str, code: str | None, exclude_id: int | None = None
+    conn: sqlite3.Connection, manufacturer_id: int, name: str, code: str | None, exclude_id: int | None = None
 ) -> None:
     row = conn.execute(
         """SELECT id FROM paint
-           WHERE py_lower(manufacturer) = py_lower(?)
+           WHERE manufacturer_id = ?
              AND py_lower(name) = py_lower(?)
              AND py_lower(ifnull(code, '')) = py_lower(ifnull(?, ''))
              AND id IS NOT ?""",
-        (manufacturer, name, code, exclude_id),
+        (manufacturer_id, name, code, exclude_id),
     ).fetchone()
     if row:
         raise Conflict(
-            f"paint '{manufacturer} {name}'{' ' + code if code else ''} already exists (id {row['id']}); "
-            "change its quantity instead"
+            f"paint '{name}'{' ' + code if code else ''} of this manufacturer already exists "
+            f"(id {row['id']}); change its quantity instead"
         )
 
 
@@ -237,7 +314,8 @@ def _assemble_paints(conn: sqlite3.Connection, rows: list[sqlite3.Row]) -> list[
             {
                 "id": r["id"],
                 "name": r["name"],
-                "manufacturer": r["manufacturer"],
+                "manufacturer": r["manufacturer_name"],
+                "manufacturer_id": r["manufacturer_id"],
                 "code": r["code"],
                 "hex": r["hex"],
                 "quantity": r["quantity"],
@@ -251,8 +329,10 @@ def _assemble_paints(conn: sqlite3.Connection, rows: list[sqlite3.Row]) -> list[
 
 
 _PAINT_SELECT = """
-    SELECT p.*, s.name AS storage_name, s.at_hand AS storage_at_hand
-    FROM paint p LEFT JOIN storage s ON s.id = p.storage_id
+    SELECT p.*, m.name AS manufacturer_name, s.name AS storage_name, s.at_hand AS storage_at_hand
+    FROM paint p
+    JOIN manufacturer m ON m.id = p.manufacturer_id
+    LEFT JOIN storage s ON s.id = p.storage_id
 """
 
 
@@ -261,6 +341,7 @@ def list_paints(
     *,
     q: str | None = None,
     manufacturer: str | None = None,
+    manufacturer_id: int | None = None,
     storage_id: int | None = None,
     no_storage: bool = False,
     tag_ids: list[int] | None = None,
@@ -271,12 +352,15 @@ def list_paints(
     params: list[Any] = []
     if q and q.strip():
         where.append(
-            "(py_lower(p.name) LIKE ? ESCAPE '\\' OR py_lower(p.manufacturer) LIKE ? ESCAPE '\\'"
+            "(py_lower(p.name) LIKE ? ESCAPE '\\' OR py_lower(m.name) LIKE ? ESCAPE '\\'"
             " OR py_lower(ifnull(p.code, '')) LIKE ? ESCAPE '\\')"
         )
         params += [_like_pattern(q.strip())] * 3
-    if manufacturer:
-        where.append("py_lower(p.manufacturer) = py_lower(?)")
+    if manufacturer_id is not None:
+        where.append("p.manufacturer_id = ?")
+        params.append(manufacturer_id)
+    elif manufacturer:
+        where.append("py_lower(m.name) = py_lower(?)")
         params.append(manufacturer.strip())
     if no_storage:
         where.append("p.storage_id IS NULL")
@@ -295,7 +379,7 @@ def list_paints(
     sql = _PAINT_SELECT
     if where:
         sql += " WHERE " + " AND ".join(where)
-    sql += " ORDER BY py_lower(p.manufacturer), py_lower(p.name), p.id"
+    sql += " ORDER BY py_lower(m.name), py_lower(p.name), p.id"
     return _assemble_paints(conn, conn.execute(sql, params).fetchall())
 
 
@@ -309,13 +393,14 @@ def get_paint(conn: sqlite3.Connection, paint_id: int) -> dict:
 def create_paint(conn: sqlite3.Connection, data: dict) -> dict:
     with conn:
         _check_refs(conn, data.get("storage_id"), data.get("tag_ids"))
-        _check_paint_unique(conn, data["manufacturer"], data["name"], data.get("code"))
+        manufacturer_id = _resolve_manufacturer(conn, data.get("manufacturer_id"), data.get("manufacturer"))
+        _check_paint_unique(conn, manufacturer_id, data["name"], data.get("code"))
         paint_id = conn.execute(
-            """INSERT INTO paint (name, manufacturer, code, hex, quantity, storage_id)
+            """INSERT INTO paint (name, manufacturer_id, code, hex, quantity, storage_id)
                VALUES (?, ?, ?, ?, ?, ?)""",
             (
                 data["name"],
-                data["manufacturer"],
+                manufacturer_id,
                 data.get("code"),
                 data.get("hex"),
                 data.get("quantity", 1),
@@ -326,27 +411,27 @@ def create_paint(conn: sqlite3.Connection, data: dict) -> dict:
     return get_paint(conn, paint_id)
 
 
-_REQUIRED_PAINT_FIELDS = ("name", "manufacturer", "quantity")
-
-
 def update_paint(conn: sqlite3.Connection, paint_id: int, changes: dict) -> dict:
     current = get_paint(conn, paint_id)
-    for field in _REQUIRED_PAINT_FIELDS:
+    for field in ("name", "quantity"):
         if field in changes and changes[field] is None:
             raise InvalidReference(f"{field} cannot be empty")
-    for field in ("name", "manufacturer"):
-        if field in changes:
-            changes[field] = changes[field].strip()
-            if not changes[field]:
-                raise InvalidReference(f"{field} cannot be empty")
+    if "name" in changes:
+        changes["name"] = changes["name"].strip()
+        if not changes["name"]:
+            raise InvalidReference("name cannot be empty")
 
     tag_ids = changes.pop("tag_ids", None)
+    manufacturer_id = changes.pop("manufacturer_id", None)
+    manufacturer_name = changes.pop("manufacturer", None)
     with conn:
         _check_refs(conn, changes.get("storage_id"), tag_ids)
-        if {"name", "manufacturer", "code"} & changes.keys():
+        if manufacturer_id is not None or manufacturer_name is not None:
+            changes["manufacturer_id"] = _resolve_manufacturer(conn, manufacturer_id, manufacturer_name)
+        if {"name", "manufacturer_id", "code"} & changes.keys():
             _check_paint_unique(
                 conn,
-                changes.get("manufacturer", current["manufacturer"]),
+                changes.get("manufacturer_id", current["manufacturer_id"]),
                 changes.get("name", current["name"]),
                 changes["code"] if "code" in changes else current["code"],
                 exclude_id=paint_id,
@@ -368,14 +453,3 @@ def delete_paint(conn: sqlite3.Connection, paint_id: int) -> None:
     with conn:
         if conn.execute("DELETE FROM paint WHERE id = ?", (paint_id,)).rowcount == 0:
             raise NotFound(f"paint {paint_id} not found")
-
-
-def list_manufacturers(conn: sqlite3.Connection, q: str | None = None) -> list[str]:
-    """Distinct manufacturer names for autocomplete."""
-    sql = "SELECT manufacturer, count(*) AS n FROM paint"
-    params: list[Any] = []
-    if q and q.strip():
-        sql += " WHERE py_lower(manufacturer) LIKE ? ESCAPE '\\'"
-        params.append(_like_pattern(q.strip()))
-    sql += " GROUP BY py_lower(manufacturer) ORDER BY n DESC, py_lower(manufacturer)"
-    return [r["manufacturer"] for r in conn.execute(sql, params)]

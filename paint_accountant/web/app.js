@@ -7,7 +7,7 @@
      #/paint/ID         edit paint
      #/storages         storages list
      #/storage/ID       one storage with its paints
-     #/tags             tags                                                  */
+     #/catalogs         manufacturers and tags                                */
 
 // ======================= small helpers =======================
 
@@ -234,7 +234,8 @@ const routes = [
   [/^#\/paint\/(\d+)$/, (m, mount) => viewPaintForm(mount, Number(m[1]))],
   [/^#\/storages$/, (m, mount) => viewStorages(mount)],
   [/^#\/storage\/(\d+)$/, (m, mount) => viewStorage(mount, Number(m[1]))],
-  [/^#\/tags$/, (m, mount) => viewTags(mount)],
+  [/^#\/catalogs$/, (m, mount) => viewCatalogs(mount)],
+  [/^#\/tags$/, () => location.replace('#/catalogs')],
 ];
 
 let renderSeq = 0;
@@ -246,7 +247,7 @@ let cleanups = [];
 function onLeave(fn) { cleanups.push(fn); }
 
 function highlightTab(hash) {
-  const tab = hash.startsWith('#/storage') ? 'storages' : hash.startsWith('#/tags') ? 'tags' : 'paints';
+  const tab = hash.startsWith('#/storage') ? 'storages' : hash.startsWith('#/catalogs') ? 'catalogs' : 'paints';
   document.querySelectorAll('.tabs a').forEach(a => a.classList.toggle('active', a.dataset.tab === tab));
 }
 
@@ -288,19 +289,25 @@ function goBack(fallback = '#/') {
 
 // ======================= paints list =======================
 
-const filters = { q: '', storage: '', tags: new Set(), atHand: false, stock: '' };
+const filters = { q: '', storage: '', maker: '', tags: new Set(), atHand: false, stock: '' };
+
+function resetListFilters() {
+  Object.assign(filters, { q: '', storage: '', maker: '', atHand: false, stock: '' });
+  filters.tags.clear();
+}
 
 function anyFilter() {
-  return Boolean(filters.q.trim() || filters.storage || filters.tags.size || filters.atHand || filters.stock);
+  return Boolean(filters.q.trim() || filters.storage || filters.maker || filters.tags.size || filters.atHand || filters.stock);
 }
 
 async function viewPaints(mount) {
-  const [tags, storages] = await Promise.all([api('GET', '/tags'), api('GET', '/storages')]);
+  const [tags, storages, makers] = await Promise.all([api('GET', '/tags'), api('GET', '/storages'), api('GET', '/manufacturers')]);
 
   // forget filters that point to deleted tags/storages
   const tagIds = new Set(tags.map(t => t.id));
   for (const id of [...filters.tags]) if (!tagIds.has(id)) filters.tags.delete(id);
   if (filters.storage && filters.storage !== 'none' && !storages.some(s => String(s.id) === filters.storage)) filters.storage = '';
+  if (filters.maker && !makers.some(m => String(m.id) === filters.maker)) filters.maker = '';
 
   const listBox = h('div');
   const summary = h('div', { class: 'summary' });
@@ -317,6 +324,12 @@ async function viewPaints(mount) {
     h('option', { value: 'none' }, 'Без хранилища'),
     storages.map(s => h('option', { value: String(s.id) }, s.name + (s.at_hand ? ' · под рукой' : ''))));
   storageSel.value = filters.storage;
+
+  const makerSel = h('select', { class: 'input', 'aria-label': 'Производитель', onchange: e => { filters.maker = e.target.value; refresh(); } },
+    h('option', { value: '' }, 'Все производители'),
+    makers.filter(m => m.paint_count > 0 || String(m.id) === filters.maker)
+      .map(m => h('option', { value: String(m.id) }, `${m.name} (${m.paint_count})`)));
+  makerSel.value = filters.maker;
 
   const stockSel = h('select', { class: 'input', 'aria-label': 'Наличие', onchange: e => { filters.stock = e.target.value; refresh(); } },
     h('option', { value: '' }, 'Любое наличие'),
@@ -339,6 +352,7 @@ async function viewPaints(mount) {
     if (filters.q.trim()) params.set('q', filters.q.trim());
     if (filters.storage === 'none') params.set('no_storage', 'true');
     else if (filters.storage) params.set('storage_id', filters.storage);
+    if (filters.maker) params.set('manufacturer_id', filters.maker);
     filters.tags.forEach(id => params.append('tag_id', id));
     if (filters.atHand) params.set('at_hand', 'true');
     if (filters.stock) params.set('in_stock', filters.stock === 'in' ? 'true' : 'false');
@@ -378,8 +392,7 @@ async function viewPaints(mount) {
   }
 
   function resetFilters() {
-    Object.assign(filters, { q: '', storage: '', atHand: false, stock: '' });
-    filters.tags.clear();
+    resetListFilters();
     render();
   }
 
@@ -392,7 +405,7 @@ async function viewPaints(mount) {
   mount(h('div', null,
     h('div', { class: 'filters' },
       search,
-      h('div', { class: 'filter-row' }, storageSel, stockSel),
+      h('div', { class: 'filter-row' }, storageSel, stockSel, makerSel),
       chips),
     summary,
     listBox,
@@ -410,13 +423,63 @@ async function viewPaintForm(mount, id, prefillStorage = null) {
   ]);
   const isNew = !paint;
   const p = paint || {
-    name: '', manufacturer: lastManufacturer(), code: '', hex: null, quantity: 1,
+    name: '', manufacturer_id: lastManufacturer(makers), code: '', hex: null, quantity: 1,
     storage: prefillStorage ? { id: prefillStorage } : null, tags: [],
   };
   const selectedTags = new Set(p.tags.map(t => t.id));
 
   const name = h('input', { class: 'input', id: 'f-name', required: true, maxlength: 200, value: p.name, autocomplete: 'off' });
-  const maker = h('input', { class: 'input', id: 'f-maker', required: true, maxlength: 100, value: p.manufacturer, list: 'makers', autocomplete: 'off' });
+  // manufacturer: pick from the list, or add a new one right here
+  const NEW = '__new';
+  const maker = h('select', { class: 'input', id: 'f-maker' },
+    h('option', { value: '' }, '— выберите —'),
+    makers.map(m => h('option', { value: String(m.id), selected: m.id === p.manufacturer_id }, m.name)),
+    h('option', { value: NEW }, '＋ Новый производитель…'));
+  let prevMaker = maker.value;
+  const newMakerInput = h('input', { class: 'input grow', id: 'f-new-maker', maxlength: 100, placeholder: 'Название производителя', autocomplete: 'off' });
+  const newMakerBox = h('div', { class: 'row', hidden: true, style: 'margin-top:8px' },
+    newMakerInput,
+    h('button', { type: 'button', class: 'btn', onclick: () => addMaker() }, 'Добавить'),
+    h('button', { type: 'button', class: 'btn ghost', onclick: () => { maker.value = prevMaker; newMakerBox.hidden = true; } }, 'Отмена'));
+  maker.addEventListener('change', () => {
+    if (maker.value === NEW) {
+      newMakerBox.hidden = false;
+      newMakerInput.value = '';
+      newMakerInput.focus();
+    } else {
+      prevMaker = maker.value;
+      newMakerBox.hidden = true;
+    }
+  });
+  newMakerInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addMaker(); } });
+
+  function selectMaker(id) {
+    maker.value = String(id);
+    prevMaker = maker.value;
+    newMakerBox.hidden = true;
+  }
+
+  async function addMaker() {
+    const value = newMakerInput.value.trim();
+    if (!value) { newMakerInput.focus(); return; }
+    try {
+      const created = await api('POST', '/manufacturers', { name: value });
+      // keep the list alphabetical; the "new" option stays last
+      const options = [...maker.options].filter(o => o.value && o.value !== NEW);
+      const before = options.find(o => o.textContent.localeCompare(created.name, 'ru', { sensitivity: 'base' }) > 0);
+      maker.insertBefore(h('option', { value: String(created.id) }, created.name), before || maker.querySelector(`option[value="${NEW}"]`));
+      selectMaker(created.id);
+      toast(`Производитель «${created.name}» добавлен`, 'ok');
+    } catch (err) {
+      const existing = [...maker.options].find(o => o.value !== NEW && o.textContent.toLowerCase() === value.toLowerCase());
+      if (err.status === 409 && existing) {
+        selectMaker(existing.value);
+        toast('Такой производитель уже есть — выбрали его', '');
+      } else {
+        toast(explain(err), 'err');
+      }
+    }
+  }
   const code = h('input', { class: 'input', id: 'f-code', maxlength: 50, value: p.code || '', autocomplete: 'off' });
 
   // color: text field + native picker + preview, kept in sync
@@ -452,11 +515,12 @@ async function viewPaintForm(mount, id, prefillStorage = null) {
   function collect() {
     const hex = normHex(hexText.value);
     if (hex === null) { hexText.focus(); throw new Error('Цвет должен быть в виде #rrggbb'); }
+    if (!maker.value || maker.value === NEW) { maker.focus(); throw new Error('Выберите производителя'); }
     const quantity = parseInt(qty.value, 10);
     if (!(quantity >= 0)) { qty.focus(); throw new Error('Количество — целое число от 0'); }
     return {
       name: name.value.trim(),
-      manufacturer: maker.value.trim(),
+      manufacturer_id: Number(maker.value),
       code: code.value.trim() || null,
       hex: hex || null,
       quantity,
@@ -478,7 +542,7 @@ async function viewPaintForm(mount, id, prefillStorage = null) {
     try {
       if (isNew) {
         const created = await api('POST', '/paints', body);
-        rememberManufacturer(created.manufacturer);
+        rememberManufacturer(created.manufacturer_id);
         if (andAnother) {
           toast(`«${created.name}» добавлена`, 'ok');
           // keep manufacturer, storage and tags — usually the next pot is from the same batch
@@ -489,7 +553,7 @@ async function viewPaintForm(mount, id, prefillStorage = null) {
         toast('Краска добавлена', 'ok');
       } else {
         await api('PATCH', `/paints/${id}`, body);
-        rememberManufacturer(body.manufacturer);
+        rememberManufacturer(body.manufacturer_id);
         toast('Сохранено', 'ok');
       }
       goBack();
@@ -504,8 +568,7 @@ async function viewPaintForm(mount, id, prefillStorage = null) {
   form.append(
     h('div', { class: 'field' }, h('label', { for: 'f-name' }, 'Название'), name),
     h('div', { class: 'two' },
-      h('div', { class: 'field' }, h('label', { for: 'f-maker' }, 'Производитель'), maker,
-        h('datalist', { id: 'makers' }, makers.map(m => h('option', { value: m })))),
+      h('div', { class: 'field' }, h('label', { for: 'f-maker' }, 'Производитель'), maker, newMakerBox),
       h('div', { class: 'field' }, h('label', { for: 'f-code' }, 'Код / артикул'), code)),
     h('div', { class: 'field' }, h('label', { for: 'f-hex' }, 'Цвет'),
       h('div', { class: 'color-row' }, preview, hexText, picker),
@@ -537,12 +600,15 @@ async function viewPaintForm(mount, id, prefillStorage = null) {
   if (isNew) name.focus({ preventScroll: true });
 }
 
-function lastManufacturer() {
-  try { return localStorage.getItem('pa.lastManufacturer') || ''; } catch { return ''; }
+/** The manufacturer used last time, if it still exists — new paints usually come in batches. */
+function lastManufacturer(makers) {
+  let id = null;
+  try { id = Number(localStorage.getItem('pa.lastManufacturerId')); } catch { /* storage blocked */ }
+  return makers.some(m => m.id === id) ? id : null;
 }
 
-function rememberManufacturer(value) {
-  try { localStorage.setItem('pa.lastManufacturer', value); } catch { /* private mode */ }
+function rememberManufacturer(id) {
+  try { localStorage.setItem('pa.lastManufacturerId', String(id)); } catch { /* private mode */ }
 }
 
 // ======================= storages =======================
@@ -643,10 +709,66 @@ async function viewStorage(mount, id) {
     h('details', { class: 'panel' }, h('summary', null, 'Название, метка, «под рукой», удаление'), settings)));
 }
 
-// ======================= tags =======================
+// ======================= catalogs: manufacturers and tags =======================
 
-async function viewTags(mount) {
-  const tags = await api('GET', '/tags');
+async function viewCatalogs(mount) {
+  const [makers, tags] = await Promise.all([api('GET', '/manufacturers'), api('GET', '/tags')]);
+  mount(h('div', null,
+    pageHead('Справочники'),
+    h('h2', { id: 'makers' }, 'Производители'),
+    manufacturersSection(makers),
+    h('h2', { id: 'tags' }, 'Теги'),
+    tagsSection(tags)));
+}
+
+function manufacturersSection(makers) {
+  const rows = makers.map(m => {
+    const nameInput = h('input', { class: 'input', value: m.name, maxlength: 100, 'aria-label': 'Название производителя' });
+    nameInput.addEventListener('change', async () => {
+      const v = nameInput.value.trim();
+      if (!v || v === m.name) { nameInput.value = m.name; return; }
+      try {
+        Object.assign(m, await api('PATCH', `/manufacturers/${m.id}`, { name: v }));
+        nameInput.value = m.name;
+        toast('Сохранено', 'ok');
+      } catch (err) {
+        nameInput.value = m.name;
+        toast(explain(err, 'Производитель с таким названием уже есть'), 'err');
+      }
+    });
+    const count = m.paint_count
+      ? h('a', { href: '#/', class: 'muted small', onclick: () => { resetListFilters(); filters.maker = String(m.id); } }, countPaints(m.paint_count))
+      : h('span', { class: 'muted small' }, 'нет красок');
+    return h('div', { class: 'tag-row' },
+      h('div', { class: 'grow' }, nameInput, h('div', { class: 'keywords' }, count)),
+      deleteButton('Удалить', async () => {
+        try {
+          await api('DELETE', `/manufacturers/${m.id}`);
+          toast('Производитель удалён', 'ok');
+          render();
+        } catch (err) {
+          toast(explain(err, 'Нельзя удалить: у производителя есть краски. Сначала перенесите или удалите их.'), 'err');
+        }
+      }));
+  });
+
+  const newName = h('input', { class: 'input grow', placeholder: 'Новый производитель', maxlength: 100, required: true });
+  const addForm = h('form', { class: 'panel row' }, newName, h('button', { type: 'submit', class: 'btn primary' }, 'Добавить'));
+  addForm.addEventListener('submit', async e => {
+    e.preventDefault();
+    try {
+      await api('POST', '/manufacturers', { name: newName.value.trim() });
+      toast('Производитель добавлен', 'ok');
+      render();
+    } catch (err) {
+      toast(explain(err, 'Такой производитель уже есть'), 'err');
+    }
+  });
+
+  return h('div', { class: 'card-list' }, addForm, rows);
+}
+
+function tagsSection(tags) {
 
   const rows = tags.map(t => {
     const nameInput = h('input', { class: 'input', value: t.name, maxlength: 50, 'aria-label': 'Название тега' });
@@ -697,12 +819,10 @@ async function viewTags(mount) {
     }
   });
 
-  mount(h('div', null,
-    pageHead('Теги'),
+  return h('div', { class: 'card-list' },
     addForm,
-    h('h2', null, 'Все теги'),
-    h('p', { class: 'muted small', style: 'margin-top:-4px' }, 'Название и цвет сохраняются сразу после изменения. Удалённый тег снимается со всех красок.'),
-    h('div', { class: 'card-list' }, rows)));
+    h('p', { class: 'muted small', style: 'margin:0' }, 'Название и цвет сохраняются сразу после изменения. Удалённый тег снимается со всех красок.'),
+    rows);
 }
 
 // ======================= start =======================
