@@ -2,7 +2,7 @@
 
 A self-hosted catalog for miniature paints: what you own, how many pots, and which box they're in.
 
-Built to run on a Raspberry Pi in your home network, with a web UI for your phone and a Telegram bot for adding paints by photo from anywhere.
+Runs on any machine in your home network — Linux (x86_64 or ARM64, including Raspberry Pi) or Windows — with a web UI for your phone and a Telegram bot for adding paints by photo from anywhere.
 
 > **Status:** planning. Nothing is implemented yet — see [plans.md](plans.md) (in Russian) for the spec and roadmap.
 
@@ -25,7 +25,16 @@ Built to run on a Raspberry Pi in your home network, with a web UI for your phon
 | Fuzzy search | rapidfuzz |
 | Web UI | plain HTTP on the local network, no certificates needed |
 | Bot | Telegram, optionally through a SOCKS5/MTProto proxy |
-| Hardware | Raspberry Pi 5 (8 GB) |
+| Platforms | Linux (x86_64, ARM64) and Windows |
+
+Development and testing happen on a Raspberry Pi 5 (8 GB), but the Pi is not a requirement.
+
+## Portability goals
+
+- Only dependencies with prebuilt wheels for Windows, Linux x86_64 and Linux ARM64
+- No hardcoded paths: data, database and photos go to a configurable folder, defaulting to the OS's standard per-user data directory
+- One command to run on any OS; autostart recipes (systemd, Windows Task Scheduler) are optional extras
+- Photo recognition is an optional module — the catalog works without it
 
 ## Roadmap
 
