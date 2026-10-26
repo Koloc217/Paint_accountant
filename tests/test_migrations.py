@@ -35,7 +35,7 @@ def test_v1_to_v2_keeps_paints_tags_and_storages(tmp_path):
     db.init_db(path)
 
     conn = db.connect(path)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == len(db.MIGRATIONS)
     rows = conn.execute(
         "SELECT p.id, p.name, m.name AS maker, p.quantity, p.storage_id FROM paint p "
         "JOIN manufacturer m ON m.id = p.manufacturer_id ORDER BY p.id"

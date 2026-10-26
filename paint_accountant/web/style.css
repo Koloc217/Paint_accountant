@@ -210,7 +210,7 @@ select.input { appearance: none; padding-right: 32px; background-image: linear-g
 .btn:disabled { opacity: .5; cursor: default; }
 .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; font-weight: 600; }
 .btn.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, transparent); background: transparent; }
-.btn.danger.armed { background: var(--danger); color: #fff; border-color: transparent; }
+.btn.danger-solid { background: var(--danger); color: #fff; border-color: transparent; font-weight: 600; }
 .btn.ghost { background: transparent; border-color: transparent; color: var(--muted); }
 
 .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
@@ -449,7 +449,7 @@ a.card { text-decoration: none; }
 
 /* ---------- form ---------- */
 
-.form { display: grid; gap: 14px; }
+.form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
 
 .field label, .field .label {
   display: block;
@@ -585,3 +585,54 @@ details.panel[open] summary { margin-bottom: 12px; }
 #toast.show { opacity: 1; transform: translate(-50%, 0); }
 #toast.err { background: var(--danger); color: #fff; }
 #toast.ok { background: var(--ok); color: #fff; }
+
+/* ---------- confirmation dialog ---------- */
+
+.dialog {
+  width: min(92vw, 400px);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 20px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, .3);
+}
+
+.dialog::backdrop { background: rgba(0, 0, 0, .45); }
+.dialog h3 { margin: 0 0 6px; font-size: 18px; line-height: 1.3; overflow-wrap: anywhere; }
+.dialog p { margin: 0 0 4px; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+
+/* ---------- add by photo ---------- */
+
+.photo-block { display: grid; gap: 10px; }
+
+.photo-btn {
+  width: 100%;
+  min-height: 52px;
+  border-style: dashed;
+  border-width: 2px;
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  color: var(--accent);
+  font-weight: 600;
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+}
+
+.photo-block, .photo-panel, .photo-section { grid-template-columns: minmax(0, 1fr); }
+.photo-panel { display: grid; gap: 14px; }
+.photo-head { display: flex; align-items: center; gap: 12px; }
+.photo-thumb { width: 64px; height: 64px; object-fit: cover; border-radius: 10px; flex: none; background: var(--chip); }
+.photo-section { display: grid; gap: 8px; }
+.photo-section > b { font-size: 15px; }
+
+.line-chip { font-size: 14px; max-width: 100%; white-space: normal; text-align: left; }
+
+.seg { display: flex; background: var(--chip); padding: 3px; border-radius: 10px; gap: 3px; }
+.seg button { flex: 1; border: 0; background: transparent; padding: 7px 6px; border-radius: 8px; font-size: 14px; color: var(--muted); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: var(--shadow); }
+
+.match-list { display: grid; gap: 8px; }
+.match { display: flex; align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); }
+.match .grow { flex: 1; min-width: 0; }
+.match-actions { display: flex; flex-direction: column; gap: 6px; flex: none; }
+.small-btn { min-height: 36px; padding: 6px 12px; font-size: 14px; }

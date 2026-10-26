@@ -144,23 +144,34 @@ function toggleChip(label, { color, pressed, plain, onToggle }) {
   return b;
 }
 
-/** Delete button that asks "sure?" on the first tap instead of a browser dialog. */
-function deleteButton(label, onConfirm) {
+/** Modal "are you sure?" window. Resolves true if the user confirms. */
+function confirmDialog({ title, text = '', confirmLabel = 'Удалить' }) {
+  return new Promise(resolve => {
+    const cancel = h('button', { type: 'button', class: 'btn' }, 'Отмена');
+    const ok = h('button', { type: 'button', class: 'btn danger-solid' }, confirmLabel);
+    const dlg = h('dialog', { class: 'dialog', 'aria-labelledby': 'dlg-title' },
+      h('h3', { id: 'dlg-title' }, title),
+      text ? h('p', { class: 'muted' }, text) : null,
+      h('div', { class: 'dialog-actions' }, cancel, ok));
+    const close = result => { dlg.close(); dlg.remove(); resolve(result); };
+    cancel.addEventListener('click', () => close(false));
+    ok.addEventListener('click', () => close(true));
+    dlg.addEventListener('cancel', e => { e.preventDefault(); close(false); }); // Esc / back gesture
+    dlg.addEventListener('click', e => { if (e.target === dlg) close(false); }); // tap outside
+    document.body.append(dlg);
+    dlg.showModal();
+    cancel.focus();
+  });
+}
+
+/** Delete button that asks for confirmation in a modal window. */
+function deleteButton(label, question, onConfirm) {
   const b = h('button', { type: 'button', class: 'btn danger' }, label);
-  let armed = false;
-  let timer;
-  const reset = () => { armed = false; b.textContent = label; b.classList.remove('armed'); };
   b.addEventListener('click', async () => {
-    if (!armed) {
-      armed = true;
-      b.textContent = 'Точно удалить?';
-      b.classList.add('armed');
-      timer = setTimeout(reset, 3500);
-      return;
-    }
-    clearTimeout(timer);
+    const { title, text } = typeof question === 'function' ? question() : question;
+    if (!(await confirmDialog({ title, text }))) return;
     b.disabled = true;
-    try { await onConfirm(); } finally { b.disabled = false; reset(); }
+    try { await onConfirm(); } finally { b.disabled = false; }
   });
   return b;
 }
@@ -415,11 +426,12 @@ async function viewPaints(mount) {
 // ======================= paint form =======================
 
 async function viewPaintForm(mount, id, prefillStorage = null) {
-  const [tags, storages, makers, paint] = await Promise.all([
+  const [tags, storages, makers, paint, photo] = await Promise.all([
     api('GET', '/tags'),
     api('GET', '/storages'),
     api('GET', '/manufacturers'),
     id ? api('GET', `/paints/${id}`) : Promise.resolve(null),
+    id ? Promise.resolve(null) : api('GET', '/recognize').catch(() => null),
   ]);
   const isNew = !paint;
   const p = paint || {
@@ -481,6 +493,7 @@ async function viewPaintForm(mount, id, prefillStorage = null) {
     }
   }
   const code = h('input', { class: 'input', id: 'f-code', maxlength: 50, value: p.code || '', autocomplete: 'off' });
+  const barcode = h('input', { class: 'input', id: 'f-barcode', maxlength: 100, value: p.barcode || '', inputmode: 'numeric', autocomplete: 'off' });
 
   // color: text field + native picker + preview, kept in sync
   const preview = swatch(p.hex, true);
@@ -506,11 +519,49 @@ async function viewPaintForm(mount, id, prefillStorage = null) {
 
   const storageSel = h('select', { class: 'input', id: 'f-storage' }, storageOptions(storages, p.storage ? p.storage.id : null));
 
-  const tagPicker = h('div', { class: 'tag-picker' }, tags.map(t => toggleChip(t.name, {
-    color: t.color,
-    pressed: selectedTags.has(t.id),
-    onToggle: v => { v ? selectedTags.add(t.id) : selectedTags.delete(t.id); },
-  })));
+  const tagChips = new Map();
+  const tagPicker = h('div', { class: 'tag-picker' }, tags.map(t => {
+    const chip = toggleChip(t.name, {
+      color: t.color,
+      pressed: selectedTags.has(t.id),
+      onToggle: v => { v ? selectedTags.add(t.id) : selectedTags.delete(t.id); },
+    });
+    tagChips.set(t.id, chip);
+    return chip;
+  }));
+  function setTag(tagId, on) {
+    const chip = tagChips.get(tagId);
+    if (!chip) return;
+    on ? selectedTags.add(tagId) : selectedTags.delete(tagId);
+    chip.setAttribute('aria-pressed', String(on));
+  }
+
+  // ---- add by photo (new paints only; optional part of the app)
+  const photoBlock = isNew ? photoRecognizer({
+    status: photo,
+    fill: {
+      get name() { return name.value; }, set name(v) { name.value = v; },
+      get code() { return code.value; }, set code(v) { code.value = v; },
+      get barcode() { return barcode.value; }, set barcode(v) { barcode.value = v; },
+      makerOptions: () => [...maker.options].filter(o => o.value && o.value !== NEW),
+      selectMaker(id, label) {
+        if (!maker.querySelector(`option[value="${id}"]`)) {
+          maker.insertBefore(h('option', { value: String(id) }, label), maker.querySelector(`option[value="${NEW}"]`));
+        }
+        selectMaker(id);
+      },
+      proposeMaker(text) {
+        maker.value = NEW;
+        newMakerBox.hidden = false;
+        newMakerInput.value = text;
+        newMakerInput.focus();
+      },
+      setTag,
+      clearForNext() {
+        name.value = ''; code.value = ''; barcode.value = ''; hexText.value = ''; setSwatch(preview, null); qty.value = '1';
+      },
+    },
+  }) : null;
 
   function collect() {
     const hex = normHex(hexText.value);
@@ -522,6 +573,7 @@ async function viewPaintForm(mount, id, prefillStorage = null) {
       name: name.value.trim(),
       manufacturer_id: Number(maker.value),
       code: code.value.trim() || null,
+      barcode: barcode.value.trim() || null,
       hex: hex || null,
       quantity,
       storage_id: storageSel.value ? Number(storageSel.value) : null,
@@ -546,7 +598,8 @@ async function viewPaintForm(mount, id, prefillStorage = null) {
         if (andAnother) {
           toast(`«${created.name}» добавлена`, 'ok');
           // keep manufacturer, storage and tags — usually the next pot is from the same batch
-          name.value = ''; code.value = ''; hexText.value = ''; setSwatch(preview, null); qty.value = '1';
+          name.value = ''; code.value = ''; barcode.value = ''; hexText.value = ''; setSwatch(preview, null); qty.value = '1';
+          if (photoBlock) photoBlock.reset();
           name.focus();
           return;
         }
@@ -558,7 +611,9 @@ async function viewPaintForm(mount, id, prefillStorage = null) {
       }
       goBack();
     } catch (err) {
-      toast(explain(err, conflict), 'err');
+      const text = err.status === 409 && /barcode/.test(err.message)
+        ? 'Этот штрихкод уже привязан к другой краске' : explain(err, conflict);
+      toast(text, 'err');
     } finally {
       buttons.forEach(b => { b.disabled = false; });
       andAnother = false;
@@ -566,10 +621,12 @@ async function viewPaintForm(mount, id, prefillStorage = null) {
   });
 
   form.append(
+    photoBlock ? photoBlock.el : null,
     h('div', { class: 'field' }, h('label', { for: 'f-name' }, 'Название'), name),
+    h('div', { class: 'field' }, h('label', { for: 'f-maker' }, 'Производитель'), maker, newMakerBox),
     h('div', { class: 'two' },
-      h('div', { class: 'field' }, h('label', { for: 'f-maker' }, 'Производитель'), maker, newMakerBox),
-      h('div', { class: 'field' }, h('label', { for: 'f-code' }, 'Код / артикул'), code)),
+      h('div', { class: 'field' }, h('label', { for: 'f-code' }, 'Код / артикул'), code),
+      h('div', { class: 'field' }, h('label', { for: 'f-barcode' }, 'Штрихкод'), barcode)),
     h('div', { class: 'field' }, h('label', { for: 'f-hex' }, 'Цвет'),
       h('div', { class: 'color-row' }, preview, hexText, picker),
       h('div', { class: 'row', style: 'margin-top:4px' }, clearColor)),
@@ -582,12 +639,12 @@ async function viewPaintForm(mount, id, prefillStorage = null) {
         h('div', { class: 'hint' }, '0 — закончилась, но остаётся в каталоге')),
       h('div', { class: 'field' }, h('label', { for: 'f-storage' }, 'Хранилище'), storageSel)),
     h('div', { class: 'field' }, h('span', { class: 'label' }, 'Теги'),
-      tags.length ? tagPicker : h('div', { class: 'muted small' }, 'Тегов нет — их можно завести на вкладке «Теги»')),
+      tags.length ? tagPicker : h('div', { class: 'muted small' }, 'Тегов нет — их можно завести в «Справочниках»')),
     h('div', { class: 'form-actions' },
       h('button', { type: 'submit', class: 'btn primary' }, isNew ? 'Добавить' : 'Сохранить'),
       isNew ? h('button', { type: 'submit', class: 'btn', onclick: () => { andAnother = true; } }, 'Добавить и ещё') : null,
       h('span', { class: 'spacer' }),
-      isNew ? null : deleteButton('Удалить', async () => {
+      isNew ? null : deleteButton('Удалить', () => ({ title: `Удалить «${name.value.trim() || p.name}»?`, text: 'Краска исчезнет из каталога.' }), async () => {
         try {
           await api('DELETE', `/paints/${id}`);
           toast('Краска удалена', 'ok');
@@ -597,7 +654,198 @@ async function viewPaintForm(mount, id, prefillStorage = null) {
 
   mount(h('div', null, pageHead(isNew ? 'Новая краска' : p.name, '#/'), form));
   window.scrollTo(0, 0);
-  if (isNew) name.focus({ preventScroll: true });
+  if (isNew && !(photo && photo.available)) name.focus({ preventScroll: true });
+}
+
+// ======================= add by photo =======================
+
+/** Phones take 12+ MP photos; send ~1600 px instead. Also applies EXIF rotation. */
+async function shrinkImage(file, maxSide = 1600) {
+  try {
+    const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    const k = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(bmp.width * k);
+    canvas.height = Math.round(bmp.height * k);
+    canvas.getContext('2d').drawImage(bmp, 0, 0, canvas.width, canvas.height);
+    if (bmp.close) bmp.close();
+    return await new Promise((resolve, reject) =>
+      canvas.toBlob(b => (b ? resolve(b) : reject(new Error('encode'))), 'image/jpeg', 0.88));
+  } catch {
+    return file; // a format the browser can't decode — let the server try
+  }
+}
+
+function photoRecognizer({ status, fill }) {
+  const el = h('div', { class: 'photo-block' });
+  if (!status || !status.available) {
+    el.append(h('div', { class: 'panel muted small' },
+      'Распознавание по фото не установлено. На компьютере с приложением выполните ',
+      h('code', null, (status && status.install) || 'pip install -r requirements-photo.txt'),
+      ' и перезапустите его.'));
+    return { el, reset() {} };
+  }
+
+  const input = h('input', { type: 'file', accept: 'image/*', hidden: true, id: 'f-photo' });
+  const button = h('button', { type: 'button', class: 'btn photo-btn' }, '📷 Заполнить по фото этикетки');
+  const panel = h('div', { class: 'panel photo-panel', hidden: true });
+  let autoTags = [];
+  let thumbUrl = null;
+
+  button.addEventListener('click', () => input.click());
+  input.addEventListener('change', () => {
+    const file = input.files && input.files[0];
+    input.value = '';
+    if (file) recognize(file);
+  });
+
+  function reset() {
+    autoTags.forEach(t => fill.setTag(t, false));
+    autoTags = [];
+    panel.hidden = true;
+    panel.replaceChildren();
+    button.textContent = '📷 Заполнить по фото этикетки';
+  }
+
+  async function recognize(file) {
+    if (thumbUrl) URL.revokeObjectURL(thumbUrl);
+    thumbUrl = URL.createObjectURL(file);
+    panel.hidden = false;
+    panel.replaceChildren(head('Распознаю…', 'Обычно это пара секунд'));
+    button.disabled = true;
+    try {
+      const blob = await shrinkImage(file);
+      const res = await fetch('/api/recognize', { method: 'POST', headers: { 'Content-Type': blob.type || 'image/jpeg' }, body: blob });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new ApiError(res.status, (data && data.detail) || `Ошибка ${res.status}`);
+      show(data);
+    } catch (err) {
+      if (!(err instanceof ApiError)) console.error(err);
+      panel.replaceChildren(head('Не получилось распознать', err.status === 422 ? 'Файл не похож на фото' : explain(err)));
+    } finally {
+      button.disabled = false;
+      button.textContent = '📷 Другое фото';
+    }
+  }
+
+  function head(title, subtitle) {
+    return h('div', { class: 'photo-head' },
+      h('img', { class: 'photo-thumb', src: thumbUrl, alt: '' }),
+      h('div', null, h('b', null, title), subtitle ? h('div', { class: 'muted small' }, subtitle) : null));
+  }
+
+  function show(data) {
+    const s = data.suggestion;
+    const filled = [];
+
+    // fill empty fields; never overwrite what the user typed
+    autoTags.forEach(t => fill.setTag(t, false));
+    autoTags = [];
+    if (s.name && !fill.name.trim()) { fill.name = s.name; filled.push('название'); }
+    if (s.manufacturer) { fill.selectMaker(s.manufacturer.id, s.manufacturer.name); filled.push('производитель'); }
+    if (s.code && !fill.code.trim()) { fill.code = s.code; filled.push('код'); }
+    if (s.barcode && !fill.barcode.trim()) { fill.barcode = s.barcode; filled.push('штрихкод'); }
+    s.tag_ids.forEach(t => fill.setTag(t, true));
+    autoTags = [...s.tag_ids];
+    if (s.tag_ids.length) filled.push(s.tag_ids.length === 1 ? 'тег' : 'теги');
+
+    const lines = data.lines.filter(l => l.kind !== 'noise');
+    const parts = [
+      head(filled.length ? 'Заполнено: ' + filled.join(', ') : 'Ничего уверенно не распознано',
+        `${data.seconds} с · проверьте поля ниже`),
+    ];
+
+    if (data.matches.length) {
+      parts.push(h('div', { class: 'photo-section' }, h('b', null, 'Похоже, это уже есть в каталоге'),
+        h('div', { class: 'match-list' }, data.matches.map(m => matchRow(m, s)))));
+    }
+
+    if (lines.length) {
+      let target = 'name';
+      const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Куда вставлять' },
+        [['name', 'Название'], ['maker', 'Производитель'], ['code', 'Код']].map(([value, label]) => {
+          const b = h('button', { type: 'button', 'aria-pressed': String(value === target) }, label);
+          b.addEventListener('click', () => {
+            target = value;
+            seg.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+          });
+          return b;
+        }));
+      let lastName = null;
+      const chips = lines.map(l => h('button', {
+        type: 'button', class: 'chip plain line-chip', title: 'Вставить',
+        onclick: () => {
+          const text = l.text;
+          if (target === 'name') {
+            const nice = niceCase(text);
+            // tapping several pieces in a row builds the name: "NULN" + "OIL"
+            fill.name = lastName !== null && fill.name === lastName ? `${fill.name} ${nice}` : nice;
+            lastName = fill.name;
+          } else if (target === 'code') {
+            fill.code = text;
+          } else {
+            const opt = fill.makerOptions().find(o => o.textContent.toLowerCase() === text.toLowerCase())
+              || fill.makerOptions().find(o => text.toLowerCase().includes(o.textContent.toLowerCase()));
+            if (opt) fill.selectMaker(Number(opt.value), opt.textContent);
+            else fill.proposeMaker(niceCase(text));
+          }
+        },
+      }, l.text));
+      parts.push(h('div', { class: 'photo-section' },
+        h('b', null, 'Текст с этикетки'),
+        h('div', { class: 'muted small' }, 'Нажмите на кусок текста, чтобы вставить его в выбранное поле'),
+        seg,
+        h('div', { class: 'tag-picker' }, chips)));
+    } else {
+      parts.push(h('p', { class: 'muted small', style: 'margin:8px 0 0' },
+        'Текст не найден. Снимите этикетку ближе, ровно и при хорошем свете, без бликов.'));
+    }
+
+    if (data.barcodes.length) {
+      const b = data.barcodes[0];
+      parts.push(h('div', { class: 'muted small photo-section' }, `Штрихкод ${b.text}: `,
+        b.paint_id ? 'уже привязан к краске из каталога' : 'новый — сохранится вместе с краской'));
+    }
+    panel.replaceChildren(...parts);
+  }
+
+  function matchRow(m, s) {
+    const p = m.paint;
+    const meta = [p.manufacturer, p.code, p.storage ? p.storage.name : null].filter(Boolean).join(' · ');
+    const plus = h('button', { type: 'button', class: 'btn primary small-btn' }, '+1 банка');
+    plus.addEventListener('click', async () => {
+      plus.disabled = true;
+      try {
+        const body = { quantity: p.quantity + 1 };
+        if (s.barcode && !p.barcode) body.barcode = s.barcode; // remember the barcode for next time
+        const updated = await api('PATCH', `/paints/${p.id}`, body);
+        toast(`${updated.name}: теперь ${countPots(updated.quantity)}`, 'ok');
+        fill.clearForNext();
+        reset();
+      } catch (err) {
+        toast(explain(err), 'err');
+        plus.disabled = false;
+      }
+    });
+    return h('div', { class: 'match' },
+      swatch(p.hex),
+      h('div', { class: 'grow' },
+        h('div', { class: 'paint-name' }, p.name),
+        h('div', { class: 'paint-meta' }, meta, ' · ', countPots(p.quantity)),
+        h('div', { class: 'muted small' }, m.by === 'barcode' ? 'совпал штрихкод' : `похоже на ${m.score}%`)),
+      h('div', { class: 'match-actions' },
+        plus,
+        h('a', { class: 'btn small-btn', href: `#/paint/${p.id}` }, 'Открыть')));
+  }
+
+  el.append(button, input, panel);
+  return { el, reset };
+}
+
+function niceCase(text) {
+  return text === text.toUpperCase() && /[A-Z]/.test(text)
+    ? text.split(' ').map(w => (/^[A-Z]+$/.test(w) ? w[0] + w.slice(1).toLowerCase() : w)).join(' ')
+    : text;
 }
 
 /** The manufacturer used last time, if it still exists — new paints usually come in batches. */
@@ -668,7 +916,7 @@ async function viewStorage(mount, id) {
     h('div', { class: 'form-actions' },
       h('button', { type: 'submit', class: 'btn primary' }, 'Сохранить'),
       h('span', { class: 'spacer' }),
-      deleteButton('Удалить хранилище', async () => {
+      deleteButton('Удалить хранилище', { title: `Удалить «${s.name}»?`, text: 'Краски из него останутся в каталоге, просто без хранилища.' }, async () => {
         try {
           await api('DELETE', `/storages/${id}`);
           toast('Хранилище удалено, краски остались в каталоге', 'ok');
@@ -741,7 +989,7 @@ function manufacturersSection(makers) {
       : h('span', { class: 'muted small' }, 'нет красок');
     return h('div', { class: 'tag-row' },
       h('div', { class: 'grow' }, nameInput, h('div', { class: 'keywords' }, count)),
-      deleteButton('Удалить', async () => {
+      deleteButton('Удалить', () => ({ title: `Удалить производителя «${m.name}»?` }), async () => {
         try {
           await api('DELETE', `/manufacturers/${m.id}`);
           toast('Производитель удалён', 'ok');
@@ -796,7 +1044,7 @@ function tagsSection(tags) {
       color,
       h('div', { class: 'grow' }, nameInput,
         t.keywords.length ? h('div', { class: 'keywords' }, 'На этикетке: ' + t.keywords.join(', ')) : null),
-      deleteButton('Удалить', async () => {
+      deleteButton('Удалить', () => ({ title: `Удалить тег «${t.name}»?`, text: 'Он снимется со всех красок.' }), async () => {
         try {
           await api('DELETE', `/tags/${t.id}`);
           toast('Тег удалён', 'ok');

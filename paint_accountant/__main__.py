@@ -6,6 +6,7 @@ import argparse
 
 import uvicorn
 
+from . import recognition
 from .app import create_app
 from .netinfo import lan_ip
 from .config import (
@@ -54,6 +55,12 @@ def main(argv: list[str] | None = None) -> None:
     print("Open in a browser:")
     for url in _urls(settings.host, settings.port):
         print(f"  {url}")
+    photo = recognition.availability()
+    if photo["available"]:
+        recognition.warm_up()
+        print("Photo recognition: on")
+    else:
+        print(f"Photo recognition: off (to enable: {photo['install']})")
     uvicorn.run(app, host=settings.host, port=settings.port)
 
 

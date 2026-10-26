@@ -124,12 +124,13 @@ class PaintIn(BaseModel):
     manufacturer_id: int | None = None
     manufacturer: str | None = Field(default=None, max_length=100)
     code: str | None = Field(default=None, max_length=50)
+    barcode: str | None = Field(default=None, max_length=100)
     hex: str | None = None
     quantity: int = Field(default=1, ge=0)
     storage_id: int | None = None
     tag_ids: list[int] = []
 
-    _strip_code = field_validator("code")(_strip_or_none)
+    _strip_code = field_validator("code", "barcode")(_strip_or_none)
     _hex = field_validator("hex")(normalize_hex)
 
     @field_validator("name")
@@ -154,12 +155,13 @@ class PaintPatch(BaseModel):
     manufacturer_id: int | None = None
     manufacturer: str | None = Field(default=None, min_length=1, max_length=100)
     code: str | None = Field(default=None, max_length=50)
+    barcode: str | None = Field(default=None, max_length=100)
     hex: str | None = None
     quantity: int | None = Field(default=None, ge=0)
     storage_id: int | None = None
     tag_ids: list[int] | None = None
 
-    _strip_code = field_validator("code")(_strip_or_none)
+    _strip_code = field_validator("code", "barcode")(_strip_or_none)
     _hex = field_validator("hex")(normalize_hex)
 
 
@@ -181,6 +183,7 @@ class Paint(BaseModel):
     manufacturer: str
     manufacturer_id: int
     code: str | None
+    barcode: str | None
     hex: str | None
     quantity: int
     storage: StorageRef | None

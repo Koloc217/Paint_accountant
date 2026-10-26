@@ -1,0 +1,8 @@
+# Optional: adding paints by photo (label text + barcodes). Runs fully offline.
+# Install with: pip install -r requirements-photo.txt
+-r requirements.txt
+rapidocr>=3.4
+onnxruntime>=1.17
+zxing-cpp>=2.2
+rapidfuzz>=3.0
+pillow>=10.0

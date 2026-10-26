@@ -6,9 +6,10 @@ import sqlite3
 from typing import Iterator
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from starlette.concurrency import run_in_threadpool
 
 from . import repository as repo
-from . import __version__
+from . import __version__, recognition
 from .db import connect
 from .netinfo import lan_url
 from .schemas import (
@@ -228,3 +229,50 @@ def delete_tag(tag_id: int, conn: sqlite3.Connection = Conn):
     except _DOMAIN_ERRORS as exc:
         raise _translate(exc)
     return Response(status_code=204)
+
+
+# ---------------- photo recognition ----------------
+
+MAX_UPLOAD = 20 * 1024 * 1024
+
+
+@router.get("/recognize", tags=["photo"])
+def recognize_status() -> dict:
+    """Whether photo recognition is installed (it is an optional part)."""
+    return recognition.availability()
+
+
+@router.post(
+    "/recognize",
+    tags=["photo"],
+    openapi_extra={"requestBody": {"required": True, "content": {"image/*": {"schema": {"type": "string", "format": "binary"}}}}},
+)
+async def recognize(request: Request) -> dict:
+    """Send a photo as the request body (Content-Type: image/jpeg or similar).
+
+    Returns the text and barcodes found, suggestions for the paint form
+    and paints already in the catalog that look like a match.
+    """
+    info = recognition.availability()
+    if not info["available"]:
+        raise HTTPException(503, f"photo recognition is not installed: {info['install']}")
+    data = await request.body()
+    if not data:
+        raise HTTPException(422, "send a photo in the request body")
+    if len(data) > MAX_UPLOAD:
+        raise HTTPException(413, "photo is too large (max 20 MB)")
+
+    db_path = request.app.state.settings.db_path
+
+    def work() -> dict:
+        reading = recognition.read_image(data)
+        conn = connect(db_path)
+        try:
+            return recognition.suggest(conn, reading)
+        finally:
+            conn.close()
+
+    try:
+        return await run_in_threadpool(work)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))

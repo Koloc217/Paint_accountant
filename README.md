@@ -4,7 +4,7 @@ A self-hosted catalog for miniature paints: what you own, how many pots, and whi
 
 Runs on any machine in your home network — Linux (x86_64 or ARM64, including Raspberry Pi) or Windows — with a web UI for your phone and a Telegram bot for adding paints by photo from anywhere.
 
-> **Status:** early development. Manual catalog works: web UI, database and REST API. Photo recognition and the Telegram bot come next. See [plans.md](plans.md) (in Russian) for the spec and roadmap.
+> **Status:** early development. Catalog, web UI and adding paints by photo work. The Telegram bot comes next. See [plans.md](plans.md) (in Russian) for the spec and roadmap.
 
 ## Quick start
 
@@ -49,10 +49,22 @@ On first start `config.ini` is created from `config.example.ini`; edit it to cha
 | `port` | `--port` | `PAINT_PORT` | `8642` |
 | `data_dir` | `--data-dir` | `PAINT_DATA_DIR` | `data` inside the app folder; relative paths are counted from the app folder, absolute ones (`/mnt/usb/paints`, `D:\Paints`) work too |
 
+### Adding paints by photo (optional)
+
+```bash
+pip install -r requirements-photo.txt
+```
+
+Restart the app — the console says `Photo recognition: on`, and the new-paint form gets a **📷** button. Take a photo of the label (or pick one from the gallery): the app reads the text and the barcode, fills in name, manufacturer, code, barcode and tags, and shows paints already in your catalog that look the same, with a **+1 pot** button. Pieces of the label text can be tapped to put them into a field.
+
+Everything runs locally on your machine: [RapidOCR](https://github.com/RapidAI/RapidOCR) (ONNX models ship inside the package, nothing is downloaded at runtime) and [zxing-cpp](https://github.com/zxing-cpp/zxing-cpp) for barcodes. Prebuilt packages exist for Windows, Linux x86_64 and ARM64 (Raspberry Pi), Python 3.10–3.14. The text model reads Latin letters and digits; Cyrillic isn't recognized.
+
+Tips: shoot the label close up, straight on, in good light, without glare. Once a paint is saved with its barcode, the next pot of it is found instantly.
+
 ### Running the tests
 
 ```bash
-pip install -r requirements-dev.txt
+pip install -r requirements-dev.txt   # includes the photo packages
 pytest
 ```
 
@@ -77,6 +89,8 @@ No build step and no external libraries — plain HTML, CSS and JavaScript in `p
 | GET / PATCH / DELETE | `/api/storages/{id}` | deleting a storage keeps its paints, without a storage |
 | GET / POST | `/api/tags` | list / add tags |
 | PATCH / DELETE | `/api/tags/{id}` | |
+| GET | `/api/recognize` | whether photo recognition is installed |
+| POST | `/api/recognize` | send a photo as the body (`Content-Type: image/jpeg`); returns label text, barcodes, form suggestions and matching paints |
 | GET | `/api/health` | status and schema version |
 
 Full details at `/docs` on a running server.

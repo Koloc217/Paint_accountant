@@ -283,6 +283,21 @@ def _check_paint_unique(
         )
 
 
+def _check_barcode_free(conn: sqlite3.Connection, barcode: str | None, exclude_id: int | None = None) -> None:
+    if not barcode:
+        return
+    row = conn.execute(
+        "SELECT p.id, p.name FROM paint p WHERE p.barcode = ? AND p.id IS NOT ?", (barcode, exclude_id)
+    ).fetchone()
+    if row:
+        raise Conflict(f"barcode {barcode} already belongs to paint '{row['name']}' (id {row['id']})")
+
+
+def find_paint_by_barcode(conn: sqlite3.Connection, barcode: str) -> dict | None:
+    rows = conn.execute(_PAINT_SELECT + " WHERE p.barcode = ?", (barcode,)).fetchall()
+    return _assemble_paints(conn, rows)[0] if rows else None
+
+
 def _set_tags(conn: sqlite3.Connection, paint_id: int, tag_ids: Iterable[int]) -> None:
     conn.execute("DELETE FROM paint_tag WHERE paint_id = ?", (paint_id,))
     conn.executemany(
@@ -317,6 +332,7 @@ def _assemble_paints(conn: sqlite3.Connection, rows: list[sqlite3.Row]) -> list[
                 "manufacturer": r["manufacturer_name"],
                 "manufacturer_id": r["manufacturer_id"],
                 "code": r["code"],
+                "barcode": r["barcode"],
                 "hex": r["hex"],
                 "quantity": r["quantity"],
                 "storage": storage,
@@ -395,13 +411,15 @@ def create_paint(conn: sqlite3.Connection, data: dict) -> dict:
         _check_refs(conn, data.get("storage_id"), data.get("tag_ids"))
         manufacturer_id = _resolve_manufacturer(conn, data.get("manufacturer_id"), data.get("manufacturer"))
         _check_paint_unique(conn, manufacturer_id, data["name"], data.get("code"))
+        _check_barcode_free(conn, data.get("barcode"))
         paint_id = conn.execute(
-            """INSERT INTO paint (name, manufacturer_id, code, hex, quantity, storage_id)
-               VALUES (?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO paint (name, manufacturer_id, code, barcode, hex, quantity, storage_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (
                 data["name"],
                 manufacturer_id,
                 data.get("code"),
+                data.get("barcode"),
                 data.get("hex"),
                 data.get("quantity", 1),
                 data.get("storage_id"),
@@ -436,6 +454,8 @@ def update_paint(conn: sqlite3.Connection, paint_id: int, changes: dict) -> dict
                 changes["code"] if "code" in changes else current["code"],
                 exclude_id=paint_id,
             )
+        if changes.get("barcode"):
+            _check_barcode_free(conn, changes["barcode"], exclude_id=paint_id)
         if changes:
             sets = ", ".join(f"{col} = ?" for col in changes)
             conn.execute(

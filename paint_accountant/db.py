@@ -103,6 +103,11 @@ MIGRATIONS: list[str] = [
     CREATE INDEX paint_storage_ix ON paint (storage_id);
     CREATE INDEX paint_manufacturer_ix ON paint (manufacturer_id);
     """,
+    # 3 — barcode on the pot, remembered when a paint is added by photo
+    """
+    ALTER TABLE paint ADD COLUMN barcode TEXT;
+    CREATE UNIQUE INDEX paint_barcode_uq ON paint (barcode) WHERE barcode IS NOT NULL;
+    """,
 ]
 
 # Starter tags: (name, plaque color, label keywords)

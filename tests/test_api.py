@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+from paint_accountant import db
 from paint_accountant.app import create_app
 from paint_accountant.config import load_settings
 
@@ -22,7 +23,7 @@ def _paint(client, **kw):
 
 
 def test_health_and_starter_tags(client):
-    assert client.get("/api/health").json() == {"status": "ok", "schema_version": 2}
+    assert client.get("/api/health").json() == {"status": "ok", "schema_version": len(db.MIGRATIONS)}
     tags = client.get("/api/tags").json()
     names = [t["name"] for t in tags]
     assert "Проливка" in names and "Контраст" in names
