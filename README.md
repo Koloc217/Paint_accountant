@@ -21,14 +21,16 @@ pip install -r requirements.txt
 python run.py
 ```
 
-Then open `http://<machine-address>:8642/` — for now it leads to the interactive API docs.
+On start it prints the addresses to open — `http://localhost:8642/` on this computer and `http://<your-LAN-IP>:8642/` from a phone on the same network. For now they lead to the interactive API docs.
+
+On Windows, allow Python through the firewall for **private networks** when asked, otherwise the phone won't reach the server. If `python` opens the Microsoft Store, use `py` instead, or turn off the `python.exe` alias in Settings → Apps → Advanced app settings → App execution aliases.
 
 ### Folder layout
 
 ```
 Paint_accountant/
 ├── run.py               start here
-├── config.ini           your settings (copy from config.example.ini, optional)
+├── config.ini           your settings (created from config.example.ini on first start)
 ├── paint_accountant/    the code
 └── data/                created on first start
     ├── paints.sqlite3   the database
@@ -39,7 +41,7 @@ Back up or move your catalog by copying the `data/` folder. To move the whole ap
 
 ### Settings
 
-Copy `config.example.ini` to `config.ini` and edit it. Command-line arguments and environment variables override the file.
+On first start `config.ini` is created from `config.example.ini`; edit it to change settings. It is personal and not tracked by git. Command-line arguments and environment variables override the file.
 
 | `config.ini` key | Argument | Environment variable | Default |
 |---|---|---|---|

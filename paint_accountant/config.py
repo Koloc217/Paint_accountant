@@ -4,7 +4,7 @@ The app is portable: everything lives inside the folder it was unpacked to.
 
     Paint_accountant/
     ├── run.py              start here
-    ├── config.ini          your settings (copy from config.example.ini)
+    ├── config.ini          your settings (created from config.example.ini on first start)
     ├── paint_accountant/   the code
     └── data/               created on first start
         ├── paints.sqlite3  the database
@@ -25,6 +25,7 @@ from pathlib import Path
 
 APP_DIR = Path(__file__).resolve().parent.parent
 CONFIG_FILE = APP_DIR / "config.ini"
+CONFIG_EXAMPLE = APP_DIR / "config.example.ini"
 
 DEFAULT_HOST = "0.0.0.0"  # reachable from a phone on the same network
 DEFAULT_PORT = 8642
@@ -76,3 +77,15 @@ def load_settings(
         port=int(port or env.get("PAINT_PORT") or file.get("port") or DEFAULT_PORT),
         data_dir=_resolve(data_dir or env.get("PAINT_DATA_DIR") or file.get("data_dir") or DEFAULT_DATA_DIR),
     )
+
+
+def ensure_config_file(path: Path = CONFIG_FILE, example: Path = CONFIG_EXAMPLE) -> bool:
+    """Create config.ini from the example on first start. Returns True if created.
+
+    config.ini is personal and stays out of git; the example is what's in the repo.
+    An existing config.ini is never touched.
+    """
+    if path.exists() or not example.is_file():
+        return False
+    path.write_text(example.read_text(encoding="utf-8"), encoding="utf-8")
+    return True

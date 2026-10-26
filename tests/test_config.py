@@ -55,3 +55,27 @@ def test_first_start_creates_data_and_photo_folders(tmp_path):
     create_app(s)
     assert s.db_path.is_file()
     assert s.photos_dir.is_dir()
+
+
+def test_config_file_created_from_example_once(tmp_path):
+    from paint_accountant.config import ensure_config_file
+
+    example = tmp_path / "config.example.ini"
+    example.write_text("[server]\nport = 8642\n", encoding="utf-8")
+    target = tmp_path / "config.ini"
+
+    assert ensure_config_file(target, example) is True
+    assert target.read_text(encoding="utf-8") == example.read_text(encoding="utf-8")
+
+    target.write_text("[server]\nport = 9999\n", encoding="utf-8")
+    assert ensure_config_file(target, example) is False  # never overwrites user's file
+    assert "9999" in target.read_text(encoding="utf-8")
+
+
+def test_example_config_matches_defaults(monkeypatch):
+    _clear_env(monkeypatch)
+    from paint_accountant.config import CONFIG_EXAMPLE, DEFAULT_DATA_DIR, DEFAULT_HOST, DEFAULT_PORT
+
+    s = load_settings(config_file=CONFIG_EXAMPLE, data_dir=None)
+    assert (s.host, s.port) == (DEFAULT_HOST, DEFAULT_PORT)
+    assert s.data_dir == APP_DIR / DEFAULT_DATA_DIR
