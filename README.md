@@ -8,7 +8,8 @@ Runs on any machine in your home network — Linux (x86_64 or ARM64, including R
 
 ## Quick start
 
-Requires Python 3.10+. The same commands work on Linux, Raspberry Pi and Windows.
+Requires Python 3.10+. The same steps work on Linux, Raspberry Pi and Windows.
+Nothing is installed system-wide: the app, its settings and its data all live in one folder.
 
 ```bash
 git clone https://github.com/Koloc217/Paint_accountant.git
@@ -16,26 +17,40 @@ cd Paint_accountant
 python -m venv .venv
 # Linux / macOS:  source .venv/bin/activate
 # Windows:        .venv\Scripts\activate
-pip install -e .
-paint-accountant            # or: python -m paint_accountant
+pip install -r requirements.txt
+python run.py
 ```
 
 Then open `http://<machine-address>:8642/` — for now it leads to the interactive API docs.
 
+### Folder layout
+
+```
+Paint_accountant/
+├── run.py               start here
+├── config.ini           your settings (copy from config.example.ini, optional)
+├── paint_accountant/    the code
+└── data/                created on first start
+    ├── paints.sqlite3   the database
+    └── photos/          uploaded pictures
+```
+
+Back up or move your catalog by copying the `data/` folder. To move the whole app, copy the folder (and recreate `.venv` on the new machine).
+
 ### Settings
 
-| Option | Environment variable | Default |
-|---|---|---|
-| `--host` | `PAINT_HOST` | `0.0.0.0` (reachable from other devices on your network) |
-| `--port` | `PAINT_PORT` | `8642` |
-| `--data-dir` | `PAINT_DATA_DIR` | your OS's per-user data folder, e.g. `~/.local/share/paint-accountant` or `%LOCALAPPDATA%\paint-accountant` |
+Copy `config.example.ini` to `config.ini` and edit it. Command-line arguments and environment variables override the file.
 
-The database is a single SQLite file, `paints.sqlite3`, in the data folder — copy it to back up.
+| `config.ini` key | Argument | Environment variable | Default |
+|---|---|---|---|
+| `host` | `--host` | `PAINT_HOST` | `0.0.0.0` (reachable from other devices on your network) |
+| `port` | `--port` | `PAINT_PORT` | `8642` |
+| `data_dir` | `--data-dir` | `PAINT_DATA_DIR` | `data` inside the app folder; relative paths are counted from the app folder, absolute ones (`/mnt/usb/paints`, `D:\Paints`) work too |
 
 ### Running the tests
 
 ```bash
-pip install -e ".[dev]"
+pip install -r requirements-dev.txt
 pytest
 ```
 

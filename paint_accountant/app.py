@@ -13,6 +13,7 @@ from .db import init_db
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or load_settings()
+    settings.ensure_dirs()
     init_db(settings.db_path)
 
     app = FastAPI(title="Paint Accountant", version=__version__)

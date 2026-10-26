@@ -1,14 +1,12 @@
 __pycache__/
 *.py[cod]
-*.egg-info/
-build/
-dist/
 .venv/
 venv/
 .pytest_cache/
 .env
 
-# local data when PAINT_DATA_DIR points inside the repo
+# your own settings and data stay out of git
+config.ini
 data/
 *.sqlite3
 *.sqlite3-*

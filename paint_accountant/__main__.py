@@ -1,0 +1,38 @@
+"""Command line: `python run.py` from the app folder (or `python -m paint_accountant`)."""
+
+from __future__ import annotations
+
+import argparse
+
+import uvicorn
+
+from .app import create_app
+from .config import CONFIG_FILE, DEFAULT_DATA_DIR, DEFAULT_HOST, DEFAULT_PORT, load_settings
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(
+        prog="run.py",
+        description="Self-hosted catalog for miniature paints. "
+        f"Settings are read from {CONFIG_FILE.name} next to run.py; arguments override it.",
+    )
+    parser.add_argument("--host", help=f"address to listen on (default {DEFAULT_HOST}, env PAINT_HOST)")
+    parser.add_argument("--port", type=int, help=f"port to listen on (default {DEFAULT_PORT}, env PAINT_PORT)")
+    parser.add_argument(
+        "--data-dir",
+        help=f"folder for the database and photos (default ./{DEFAULT_DATA_DIR} in the app folder, env PAINT_DATA_DIR)",
+    )
+    parser.add_argument("--config", help=f"settings file to use instead of {CONFIG_FILE.name}")
+    args = parser.parse_args(argv)
+
+    settings = load_settings(
+        host=args.host, port=args.port, data_dir=args.data_dir, config_file=args.config
+    )
+    app = create_app(settings)
+    print(f"Paint Accountant: data in {settings.data_dir}")
+    print(f"Open http://<this-machine>:{settings.port}/ (API docs at /docs)")
+    uvicorn.run(app, host=settings.host, port=settings.port)
+
+
+if __name__ == "__main__":
+    main()
