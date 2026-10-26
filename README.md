@@ -4,7 +4,56 @@ A self-hosted catalog for miniature paints: what you own, how many pots, and whi
 
 Runs on any machine in your home network — Linux (x86_64 or ARM64, including Raspberry Pi) or Windows — with a web UI for your phone and a Telegram bot for adding paints by photo from anywhere.
 
-> **Status:** planning. Nothing is implemented yet — see [plans.md](plans.md) (in Russian) for the spec and roadmap.
+> **Status:** early development. The database and REST API work; the web UI is next. See [plans.md](plans.md) (in Russian) for the spec and roadmap.
+
+## Quick start
+
+Requires Python 3.10+. The same commands work on Linux, Raspberry Pi and Windows.
+
+```bash
+git clone https://github.com/Koloc217/Paint_accountant.git
+cd Paint_accountant
+python -m venv .venv
+# Linux / macOS:  source .venv/bin/activate
+# Windows:        .venv\Scripts\activate
+pip install -e .
+paint-accountant            # or: python -m paint_accountant
+```
+
+Then open `http://<machine-address>:8642/` — for now it leads to the interactive API docs.
+
+### Settings
+
+| Option | Environment variable | Default |
+|---|---|---|
+| `--host` | `PAINT_HOST` | `0.0.0.0` (reachable from other devices on your network) |
+| `--port` | `PAINT_PORT` | `8642` |
+| `--data-dir` | `PAINT_DATA_DIR` | your OS's per-user data folder, e.g. `~/.local/share/paint-accountant` or `%LOCALAPPDATA%\paint-accountant` |
+
+The database is a single SQLite file, `paints.sqlite3`, in the data folder — copy it to back up.
+
+### Running the tests
+
+```bash
+pip install -e ".[dev]"
+pytest
+```
+
+## API
+
+| Method | Path | What it does |
+|---|---|---|
+| GET | `/api/paints` | list paints; filters: `q`, `manufacturer`, `storage_id`, `no_storage`, `tag_id` (repeatable), `at_hand`, `in_stock` |
+| POST | `/api/paints` | add a paint |
+| GET / PATCH / DELETE | `/api/paints/{id}` | read, change, delete a paint |
+| GET | `/api/manufacturers` | manufacturer names for autocomplete, `q` to filter |
+| GET / POST | `/api/storages` | list (with paint and pot counts) / add storages |
+| GET / PATCH / DELETE | `/api/storages/{id}` | deleting a storage keeps its paints, without a storage |
+| GET / POST | `/api/tags` | list / add tags |
+| PATCH / DELETE | `/api/tags/{id}` | |
+| GET | `/api/health` | status and schema version |
+
+Full details at `/docs` on a running server.
 
 ## Idea
 
