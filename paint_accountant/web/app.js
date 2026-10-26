@@ -686,25 +686,32 @@ function photoRecognizer({ status, fill }) {
     return { el, reset() {} };
   }
 
+  // camera: capture="environment" opens the rear camera straight away on phones (works over plain http);
+  // gallery: the usual file picker. On a computer both open the file picker.
+  const cameraInput = h('input', { type: 'file', accept: 'image/*', capture: 'environment', hidden: true, id: 'f-camera' });
   const input = h('input', { type: 'file', accept: 'image/*', hidden: true, id: 'f-photo' });
-  const button = h('button', { type: 'button', class: 'btn photo-btn' }, '📷 Заполнить по фото этикетки');
+  const button = h('button', { type: 'button', class: 'btn photo-btn' }, '📷 Снять этикетку');
+  const galleryButton = h('button', { type: 'button', class: 'btn photo-btn secondary' }, '🖼 Галерея');
   const panel = h('div', { class: 'panel photo-panel', hidden: true });
   let autoTags = [];
   let thumbUrl = null;
 
-  button.addEventListener('click', () => input.click());
-  input.addEventListener('change', () => {
-    const file = input.files && input.files[0];
-    input.value = '';
-    if (file) recognize(file);
-  });
+  button.addEventListener('click', () => cameraInput.click());
+  galleryButton.addEventListener('click', () => input.click());
+  for (const inp of [cameraInput, input]) {
+    inp.addEventListener('change', () => {
+      const file = inp.files && inp.files[0];
+      inp.value = '';
+      if (file) recognize(file);
+    });
+  }
 
   function reset() {
     autoTags.forEach(t => fill.setTag(t, false));
     autoTags = [];
     panel.hidden = true;
     panel.replaceChildren();
-    button.textContent = '📷 Заполнить по фото этикетки';
+    button.textContent = '📷 Снять этикетку';
   }
 
   async function recognize(file) {
@@ -712,7 +719,7 @@ function photoRecognizer({ status, fill }) {
     thumbUrl = URL.createObjectURL(file);
     panel.hidden = false;
     panel.replaceChildren(head('Распознаю…', 'Обычно это пара секунд'));
-    button.disabled = true;
+    button.disabled = galleryButton.disabled = true;
     try {
       const blob = await shrinkImage(file);
       const res = await fetch('/api/recognize', { method: 'POST', headers: { 'Content-Type': blob.type || 'image/jpeg' }, body: blob });
@@ -723,8 +730,8 @@ function photoRecognizer({ status, fill }) {
       if (!(err instanceof ApiError)) console.error(err);
       panel.replaceChildren(head('Не получилось распознать', err.status === 422 ? 'Файл не похож на фото' : explain(err)));
     } finally {
-      button.disabled = false;
-      button.textContent = '📷 Другое фото';
+      button.disabled = galleryButton.disabled = false;
+      button.textContent = '📷 Снять ещё';
     }
   }
 
@@ -835,7 +842,7 @@ function photoRecognizer({ status, fill }) {
         h('a', { class: 'btn small-btn', href: `#/paint/${p.id}` }, 'Открыть')));
   }
 
-  el.append(button, input, panel);
+  el.append(h('div', { class: 'photo-buttons' }, button, galleryButton), cameraInput, input, panel);
   return { el, reset };
 }
 
