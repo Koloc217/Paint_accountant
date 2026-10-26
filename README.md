@@ -61,6 +61,13 @@ Everything runs locally on your machine: [RapidOCR](https://github.com/RapidAI/R
 
 Tips: shoot the label close up, straight on, in good light, without glare. Once a paint is saved with its barcode, the next pot of it is found instantly.
 
+**Camera modes on a phone** (chosen per device, remembered by the browser):
+
+- **Фото** — the button opens the phone's camera app; works over plain `http`.
+- **Поток + фото** — live video right in the page: point at a barcode and the paint is found in a moment (with **+1 pot** right there, scanning continues for the next pot); for a new barcode press **Снимок этикетки** to read the label. Browsers allow live video only over HTTPS — on Android Chrome you can allow it for the app's address with the flag `chrome://flags/#unsafely-treat-insecure-origin-as-secure` (the app shows the steps). Barcodes are read by Chrome's built-in detector when available, otherwise frames go to the server.
+
+On a computer there is just an upload button.
+
 ### Running the tests
 
 ```bash
@@ -81,7 +88,7 @@ No build step and no external libraries — plain HTML, CSS and JavaScript in `p
 
 | Method | Path | What it does |
 |---|---|---|
-| GET | `/api/paints` | list paints; filters: `q`, `manufacturer_id` or `manufacturer` (name), `storage_id`, `no_storage`, `tag_id` (repeatable), `at_hand`, `in_stock` |
+| GET | `/api/paints` | list paints; filters: `q`, `barcode`, `manufacturer_id` or `manufacturer` (name), `storage_id`, `no_storage`, `tag_id` (repeatable), `at_hand`, `in_stock` |
 | POST | `/api/paints` | add a paint; give `manufacturer_id`, or `manufacturer` by name (a new name is added to the list) |
 | GET / PATCH / DELETE | `/api/paints/{id}` | read, change (name, manufacturer, code, barcode, color, tags), delete a paint |
 | POST | `/api/paints/{id}/add` | add pots: `{"count": 1}` uses the default storage and copies rule, `{"storage_id": N}` puts them there |
@@ -94,7 +101,7 @@ No build step and no external libraries — plain HTML, CSS and JavaScript in `p
 | GET / POST | `/api/tags` | list / add tags |
 | PATCH / DELETE | `/api/tags/{id}` | |
 | GET | `/api/recognize` | whether photo recognition is installed |
-| POST | `/api/recognize` | send a photo as the body (`Content-Type: image/jpeg`); returns label text, barcodes, form suggestions and matching paints |
+| POST | `/api/recognize` | send a photo as the body (`Content-Type: image/jpeg`); returns label text, barcodes, form suggestions and matching paints; `?barcode_only=true` skips text (for live camera frames) |
 | GET | `/api/health` | status and schema version |
 
 Full details at `/docs` on a running server.

@@ -424,6 +424,7 @@ def list_paints(
     tag_ids: list[int] | None = None,
     at_hand: bool | None = None,
     in_stock: bool | None = None,
+    barcode: str | None = None,
 ) -> list[dict]:
     where: list[str] = []
     params: list[Any] = []
@@ -453,6 +454,9 @@ def list_paints(
         where.append(hand if at_hand else f"NOT {hand}")
     if in_stock is not None:
         where.append(f"{_TOTAL} > 0" if in_stock else f"{_TOTAL} = 0")
+    if barcode:
+        where.append("p.barcode = ?")
+        params.append(barcode.strip())
 
     sql = _PAINT_SELECT
     if where:

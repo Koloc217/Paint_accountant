@@ -81,6 +81,7 @@ def list_paints(
     tag_id: list[int] = Query([], description="repeat to require several tags"),
     at_hand: bool | None = Query(None, description="only paints in (or not in) 'at hand' storages"),
     in_stock: bool | None = Query(None, description="true: quantity > 0, false: quantity = 0"),
+    barcode: str | None = Query(None, description="exact barcode"),
     conn: sqlite3.Connection = Conn,
 ):
     return repo.list_paints(
@@ -93,6 +94,7 @@ def list_paints(
         tag_ids=tag_id,
         at_hand=at_hand,
         in_stock=in_stock,
+        barcode=barcode,
     )
 
 
@@ -284,7 +286,10 @@ def recognize_status() -> dict:
     tags=["photo"],
     openapi_extra={"requestBody": {"required": True, "content": {"image/*": {"schema": {"type": "string", "format": "binary"}}}}},
 )
-async def recognize(request: Request) -> dict:
+async def recognize(
+    request: Request,
+    barcode_only: bool = Query(False, description="skip text reading — for frames of a live camera"),
+) -> dict:
     """Send a photo as the request body (Content-Type: image/jpeg or similar).
 
     Returns the text and barcodes found, suggestions for the paint form
@@ -302,7 +307,7 @@ async def recognize(request: Request) -> dict:
     db_path = request.app.state.settings.db_path
 
     def work() -> dict:
-        reading = recognition.read_image(data)
+        reading = recognition.read_image(data, ocr=not barcode_only)
         conn = connect(db_path)
         try:
             return recognition.suggest(conn, reading)

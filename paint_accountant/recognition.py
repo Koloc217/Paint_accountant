@@ -116,7 +116,8 @@ def load_image(data: bytes):
     return img
 
 
-def read_image(data: bytes) -> Reading:
+def read_image(data: bytes, ocr: bool = True) -> Reading:
+    """ocr=False reads barcodes only — fast enough for frames of a live camera."""
     info = availability()
     if not info["available"]:
         raise NotAvailable(info["install"])
@@ -129,7 +130,7 @@ def read_image(data: bytes) -> Reading:
     reading = Reading(width=img.width, height=img.height)
     if info["barcode"]:
         reading.barcodes = _read_barcodes(img)
-    if info["ocr"]:
+    if ocr and info["ocr"]:
         reading.lines = _read_text(img)
     reading.seconds = round(time.perf_counter() - started, 2)
     return reading

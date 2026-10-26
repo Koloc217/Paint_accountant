@@ -827,17 +827,39 @@ function photoRecognizer({ status, fill }) {
     return { el, reset() {} };
   }
 
-  // camera: capture="environment" opens the rear camera straight away on phones (works over plain http);
-  // gallery: the usual file picker. On a computer both open the file picker.
+  // Phones: "photo" mode — capture="environment" opens the rear camera app straight away (works over
+  // plain http); "stream" mode — live video in the page that catches barcodes, plus a shutter for the label
+  // (browsers allow live video only on HTTPS, or with a Chrome flag). Computers: just picking a file.
+  const touch = window.matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
+  let mode = touch ? cameraMode() : 'photo';
   const cameraInput = h('input', { type: 'file', accept: 'image/*', capture: 'environment', hidden: true, id: 'f-camera' });
   const input = h('input', { type: 'file', accept: 'image/*', hidden: true, id: 'f-photo' });
-  const button = h('button', { type: 'button', class: 'btn photo-btn' }, '📷 Снять этикетку');
-  const galleryButton = h('button', { type: 'button', class: 'btn photo-btn secondary' }, '🖼 Галерея');
+  const button = h('button', { type: 'button', class: 'btn photo-btn' });
+  const galleryButton = h('button', { type: 'button', class: 'btn photo-btn secondary' }, touch ? '🖼 Галерея' : '🖼 Загрузить фото этикетки');
   const panel = h('div', { class: 'panel photo-panel', hidden: true });
   let autoTags = [];
   let thumbUrl = null;
 
-  button.addEventListener('click', () => cameraInput.click());
+  const modeSeg = touch ? h('div', { class: 'seg', role: 'group', 'aria-label': 'Режим камеры' },
+    [['photo', 'Фото'], ['stream', 'Поток + фото']].map(([value, label]) => {
+      const b = h('button', { type: 'button', 'data-mode': value, 'aria-pressed': String(value === mode) }, label);
+      b.addEventListener('click', () => {
+        mode = value;
+        cameraMode(value);
+        modeSeg.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+        stopStream();
+        labelButton();
+      });
+      return b;
+    })) : null;
+
+  function labelButton() {
+    button.textContent = mode === 'stream' ? '🎥 Камера' : '📷 Снять этикетку';
+    button.hidden = !touch;
+  }
+  labelButton();
+
+  button.addEventListener('click', () => (mode === 'stream' ? startStream() : cameraInput.click()));
   galleryButton.addEventListener('click', () => input.click());
   for (const inp of [cameraInput, input]) {
     inp.addEventListener('change', () => {
@@ -848,11 +870,155 @@ function photoRecognizer({ status, fill }) {
   }
 
   function reset() {
+    stopStream();
     autoTags.forEach(t => fill.setTag(t, false));
     autoTags = [];
     panel.hidden = true;
     panel.replaceChildren();
-    button.textContent = '📷 Снять этикетку';
+    labelButton();
+  }
+
+  // ---------- live stream ----------
+  const video = h('video', { class: 'stream-video', playsinline: true, muted: true, autoplay: true });
+  video.muted = true;
+  const streamStatus = h('div', { class: 'stream-status' }, 'Наведите камеру на штрихкод банки');
+  const shutter = h('button', { type: 'button', class: 'btn primary' }, '📸 Снимок этикетки');
+  const closeStream = h('button', { type: 'button', class: 'btn' }, 'Закрыть');
+  const streamBox = h('div', { class: 'panel stream-box', hidden: true },
+    h('div', { class: 'stream-frame' }, video, h('div', { class: 'stream-aim' })),
+    streamStatus,
+    h('div', { class: 'row' }, shutter, closeStream));
+  let stream = null;
+  let scanning = false;
+  let scanTimer = null;
+  let lastCode = null;
+  let detector = null;
+
+  closeStream.addEventListener('click', () => stopStream());
+  shutter.addEventListener('click', async () => {
+    const blob = await frameBlob(1600, 0.9);
+    stopStream();
+    if (blob) recognize(blob);
+  });
+  onLeave(() => stopStream());
+
+  async function startStream() {
+    if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      showFlagHelp();
+      return;
+    }
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+        audio: false,
+      });
+    } catch (err) {
+      panel.hidden = false;
+      panel.replaceChildren(h('div', null, h('b', null, 'Нет доступа к камере'),
+        h('div', { class: 'muted small' }, 'Разрешите камеру для этого сайта в настройках браузера. ', String(err.message || err))));
+      return;
+    }
+    panel.hidden = true;
+    video.srcObject = stream;
+    streamBox.hidden = false;
+    lastCode = null;
+    streamStatus.replaceChildren('Наведите камеру на штрихкод банки');
+    try { await video.play(); } catch { /* autoplay is allowed for muted video */ }
+    detector = await barcodeDetector();
+    scanning = true;
+    tick();
+  }
+
+  function stopStream() {
+    scanning = false;
+    clearTimeout(scanTimer);
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    stream = null;
+    video.srcObject = null;
+    streamBox.hidden = true;
+  }
+
+  async function barcodeDetector() {
+    // Chrome on Android has a built-in fast detector; elsewhere frames go to the server
+    if (!('BarcodeDetector' in window)) return null;
+    try {
+      const wanted = ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128'];
+      const formats = (await window.BarcodeDetector.getSupportedFormats()).filter(f => wanted.includes(f));
+      return formats.length ? new window.BarcodeDetector({ formats }) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function frameBlob(maxSide, quality) {
+    if (!video.videoWidth) return null;
+    const k = Math.min(1, maxSide / Math.max(video.videoWidth, video.videoHeight));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(video.videoWidth * k);
+    canvas.height = Math.round(video.videoHeight * k);
+    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+    return new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', quality));
+  }
+
+  async function tick() {
+    if (!scanning) return;
+    let code = null;
+    try {
+      if (detector) {
+        const found = await detector.detect(video);
+        code = found.length ? found[0].rawValue : null;
+      } else {
+        const blob = await frameBlob(1000, 0.8);
+        if (blob) {
+          const res = await fetch('/api/recognize?barcode_only=true', { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: blob });
+          if (res.ok) {
+            const data = await res.json();
+            code = data.barcodes.length ? data.barcodes[0].text : null;
+          }
+        }
+      }
+    } catch { /* a bad frame — try the next one */ }
+    if (code && scanning && code !== lastCode) await onBarcode(code);
+    if (scanning) scanTimer = setTimeout(tick, detector ? 250 : 700);
+  }
+
+  async function onBarcode(code) {
+    lastCode = code;
+    if (navigator.vibrate) navigator.vibrate(60);
+    let found = [];
+    try { found = await api('GET', `/paints?barcode=${encodeURIComponent(code)}`); } catch { /* offline */ }
+    if (found.length) {
+      // known paint: +1 right here, and keep scanning for the next pot
+      const afterAdd = updated => {
+        streamStatus.replaceChildren(
+          h('div', { class: 'muted small' }, 'Добавлено. Ещё одна такая же — жмите «+1» снова, другая банка — наведите на её штрихкод.'),
+          matchRow({ paint: updated, score: 100, by: 'barcode' }, { barcode: null }, afterAdd));
+      };
+      streamStatus.replaceChildren(
+        h('div', { class: 'muted small' }, `Штрихкод ${code} — это:`),
+        matchRow({ paint: found[0], score: 100, by: 'barcode' }, { barcode: null }, afterAdd));
+    } else {
+      if (!fill.barcode.trim()) fill.barcode = code;
+      streamStatus.replaceChildren(
+        h('b', null, `Новый штрихкод ${code}`),
+        h('div', { class: 'muted small' }, 'Его ещё нет в каталоге. Наведите камеру на этикетку и нажмите «Снимок этикетки» — заполню остальное.'));
+      shutter.classList.add('pulse');
+    }
+  }
+
+  function showFlagHelp() {
+    const origin = location.origin;
+    const flag = 'chrome://flags/#unsafely-treat-insecure-origin-as-secure';
+    const copyBtn = text => h('button', { type: 'button', class: 'btn small-btn', onclick: async () => toast(await copyText(text) ? 'Скопировано' : 'Выделите и скопируйте вручную') }, 'Копировать');
+    panel.hidden = false;
+    panel.replaceChildren(
+      h('b', null, 'Поток с камеры здесь недоступен'),
+      h('div', { class: 'muted small' }, 'Живое видео браузер разрешает только по HTTPS. На этом телефоне его можно включить флагом Chrome:'),
+      h('ol', { class: 'flag-steps' },
+        h('li', null, 'Откройте в Chrome адрес', h('div', { class: 'link-box' }, h('code', null, flag), copyBtn(flag))),
+        h('li', null, 'В поле впишите адрес приложения', h('div', { class: 'link-box' }, h('code', null, origin), copyBtn(origin))),
+        h('li', null, 'Переключите на «Enabled» и нажмите «Relaunch».')),
+      h('div', { class: 'muted small' }, 'Пока можно пользоваться режимом «Фото».'));
   }
 
   async function recognize(file) {
@@ -954,7 +1120,7 @@ function photoRecognizer({ status, fill }) {
     panel.replaceChildren(...parts);
   }
 
-  function matchRow(m, s) {
+  function matchRow(m, s, onDone = null) {
     const p = m.paint;
     const meta = [p.manufacturer, p.code, locationsText(p)].filter(Boolean).join(' · ');
     const plus = h('button', { type: 'button', class: 'btn primary small-btn' }, '+1 банка');
@@ -966,6 +1132,7 @@ function photoRecognizer({ status, fill }) {
         }
         const r = await api('POST', `/paints/${p.id}/add`, fill.placement());
         showNotice(r.paint, r.notice);
+        if (onDone) { onDone(r.paint); return; } // live scanning goes on
         fill.clearForNext();
         reset();
       } catch (err) {
@@ -984,8 +1151,18 @@ function photoRecognizer({ status, fill }) {
         h('a', { class: 'btn small-btn', href: `#/paint/${p.id}` }, 'Открыть')));
   }
 
-  el.append(h('div', { class: 'photo-buttons' }, button, galleryButton), cameraInput, input, panel);
+  el.append(modeSeg || '', h('div', { class: 'photo-buttons' }, button, galleryButton), cameraInput, input, streamBox, panel);
   return { el, reset };
+}
+
+/** Camera mode on this device: 'photo' or 'stream' (remembered per browser). */
+function cameraMode(set) {
+  try {
+    if (set) localStorage.setItem('pa.cameraMode', set);
+    return localStorage.getItem('pa.cameraMode') === 'stream' ? 'stream' : 'photo';
+  } catch {
+    return set || 'photo';
+  }
 }
 
 function niceCase(text) {

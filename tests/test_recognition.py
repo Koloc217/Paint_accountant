@@ -230,3 +230,19 @@ def test_similar_but_different_paint_is_not_offered(client, conn):
     client.post("/api/paints", json={"name": "Matt Black", "manufacturer": "AK"})
     r = suggest(conn, _reading(("FLAT BLACK", 70)))
     assert r["matches"] == []
+
+
+@needs_barcode
+def test_barcode_only_mode_for_live_frames(client):
+    photo = _label([("CITADEL", 40), ("NULN OIL", 90)], barcode="5011921027835")
+    data = client.post("/api/recognize?barcode_only=true", content=photo, headers={"Content-Type": "image/jpeg"}).json()
+    assert data["lines"] == []  # no text reading
+    assert data["barcodes"][0]["text"] == "5011921027835"
+
+
+def test_find_paint_by_barcode_in_list(client):
+    p = client.post("/api/paints", json={"name": "Nuln Oil", "manufacturer": "Citadel", "barcode": "5011921027835"}).json()
+    client.post("/api/paints", json={"name": "Other", "manufacturer": "Citadel"})
+    found = client.get("/api/paints", params={"barcode": "5011921027835"}).json()
+    assert [x["id"] for x in found] == [p["id"]]
+    assert client.get("/api/paints", params={"barcode": "000"}).json() == []
