@@ -49,3 +49,7 @@ Later ideas (return-to-box, cross-brand substitutes by color distance, shopping 
 ## Acknowledgements
 
 Third-party code or data used in this project will be credited here, with its original license kept in the repository.
+
+## License
+
+Paint Accountant is free software, licensed under the [GNU General Public License v3.0](LICENSE).

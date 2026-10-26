@@ -139,4 +139,4 @@
 - [ ] В шапке перенесённого файла — комментарий «адаптировано из minipainter, MIT, © Artur Skowronski» со ссылкой
 - [ ] Текст их лицензии — в `THIRD_PARTY_LICENSES.md` (или `LICENSES/minipainter.txt`)
 - [ ] В README — раздел **Acknowledgements** с нейтральной формулировкой: «Paint catalog data adapted from minipainter by Artur Skowronski (MIT)»
-- [ ] Выбрать лицензию для самого проекта (MIT совместима и проще всего)
+- [x] Лицензия проекта: GPL-3.0. Код под MIT в GPL-проект брать можно; их текст лицензии всё равно сохраняем
