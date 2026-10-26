@@ -4,7 +4,7 @@ A self-hosted catalog for miniature paints: what you own, how many pots, and whi
 
 Runs on any machine in your home network — Linux (x86_64 or ARM64, including Raspberry Pi) or Windows — with a web UI for your phone and a Telegram bot for adding paints by photo from anywhere.
 
-> **Status:** early development. The database and REST API work; the web UI is next. See [plans.md](plans.md) (in Russian) for the spec and roadmap.
+> **Status:** early development. Manual catalog works: web UI, database and REST API. Photo recognition and the Telegram bot come next. See [plans.md](plans.md) (in Russian) for the spec and roadmap.
 
 ## Quick start
 
@@ -21,7 +21,7 @@ pip install -r requirements.txt
 python run.py
 ```
 
-On start it prints the addresses to open — `http://localhost:8642/` on this computer and `http://<your-LAN-IP>:8642/` from a phone on the same network. For now they lead to the interactive API docs.
+On start it prints the addresses to open — `http://localhost:8642/` on this computer and `http://<your-LAN-IP>:8642/` from a phone on the same network. The web UI is in Russian and works on phones and desktops, in light and dark mode. The REST API docs are at `/docs`.
 
 On Windows, allow Python through the firewall for **private networks** when asked, otherwise the phone won't reach the server. If `python` opens the Microsoft Store, use `py` instead, or turn off the `python.exe` alias in Settings → Apps → Advanced app settings → App execution aliases.
 
@@ -55,6 +55,14 @@ On first start `config.ini` is created from `config.example.ini`; edit it to cha
 pip install -r requirements-dev.txt
 pytest
 ```
+
+## Web UI
+
+- **Краски** — list with color swatches, search, filters by storage, tags, "at hand" and stock; quick +/− for the number of pots; add, edit, delete
+- **Хранилища** — boxes and drawers with paint and pot counts; each storage has a short link `http://<address>:8642/storage/<id>` to write into an NFC tag or a QR code
+- **Теги** — rename, recolor, add, delete
+
+No build step and no external libraries — plain HTML, CSS and JavaScript in `paint_accountant/web/`, so it works on a home network without internet.
 
 ## API
 

@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import argparse
-import socket
 
 import uvicorn
 
 from .app import create_app
+from .netinfo import lan_ip
 from .config import (
     CONFIG_FILE,
     DEFAULT_DATA_DIR,
@@ -18,25 +18,10 @@ from .config import (
 )
 
 
-def _lan_ip() -> str | None:
-    """This machine's address in the local network.
-
-    Connecting a UDP socket sends no packets; it only makes the OS pick
-    the outgoing interface, whose address we then read.
-    """
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-            s.connect(("10.255.255.255", 1))
-            ip = s.getsockname()[0]
-        return None if ip.startswith("127.") else ip
-    except OSError:
-        return None
-
-
 def _urls(host: str, port: int) -> list[str]:
     if host in ("0.0.0.0", "", "::"):
         urls = [f"http://localhost:{port}/  (this computer)"]
-        ip = _lan_ip()
+        ip = lan_ip()
         if ip:
             urls.append(f"http://{ip}:{port}/  (phone or other devices on your network)")
         return urls

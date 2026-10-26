@@ -8,7 +8,9 @@ from typing import Iterator
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 
 from . import repository as repo
+from . import __version__
 from .db import connect
+from .netinfo import lan_url
 from .schemas import (
     Paint,
     PaintIn,
@@ -52,6 +54,12 @@ _DOMAIN_ERRORS = (repo.NotFound, repo.Conflict, repo.InvalidReference)
 def health(conn: sqlite3.Connection = Conn) -> dict:
     version = conn.execute("PRAGMA user_version").fetchone()[0]
     return {"status": "ok", "schema_version": version}
+
+
+@router.get("/info", tags=["system"])
+def info(request: Request) -> dict:
+    """Version and the address other devices on the network can use (for NFC/QR links)."""
+    return {"version": __version__, "lan_url": lan_url(request.app.state.settings.port)}
 
 
 # ---------------- paints ----------------

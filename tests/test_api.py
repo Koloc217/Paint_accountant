@@ -30,9 +30,8 @@ def test_health_and_starter_tags(client):
     assert set(wash["keywords"]) == {"shade", "wash"}
 
 
-def test_root_redirects_to_docs(client):
-    r = client.get("/", follow_redirects=False)
-    assert r.status_code in (302, 307) and r.headers["location"] == "/docs"
+def test_docs_still_available(client):
+    assert client.get("/docs").status_code == 200
 
 
 def test_paint_crud_and_hex_normalization(client):

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f6f4f1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#16181d" media="(prefers-color-scheme: dark)">
+<title>Paint Accountant</title>
+<link rel="icon" href="/static/icon.svg?v=__V__" type="image/svg+xml">
+<link rel="stylesheet" href="/static/style.css?v=__V__">
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="#/"><img src="/static/icon.svg?v=__V__" alt="" width="22" height="22"> Paint Accountant</a>
+    <nav class="tabs">
+      <a href="#/" data-tab="paints">Краски</a>
+      <a href="#/storages" data-tab="storages">Хранилища</a>
+      <a href="#/tags" data-tab="tags">Теги</a>
+    </nav>
+  </div>
+</header>
+<main id="view"></main>
+<div id="toast" role="status" aria-live="polite"></div>
+<script src="/static/app.js?v=__V__"></script>
+</body>
+</html>
