@@ -253,3 +253,19 @@ def test_find_paint_by_barcode_in_list(client):
 def test_thinner_label_suggests_technical_tag(client, conn):
     r = suggest(conn, _reading(("Vallejo", 20), ("Airbrush Thinner", 50), ("71.161", 20)))
     assert _tag_id(client, "Техническая") in r["suggestion"]["tag_ids"]
+
+
+@pytest.mark.parametrize(
+    "label, tag",
+    [
+        ("Airbrush Cleaner", "Техническая"),
+        ("Brush Cleaner", "Техническая"),
+        ("Plastic Putty", "Техническая"),
+        ("Dipping Ink", "Чернила"),
+        ("Quickshade Dip", "Чернила"),
+        ("Inks", "Чернила"),
+    ],
+)
+def test_label_words_suggest_tags(client, conn, label, tag):
+    r = suggest(conn, _reading((label, 50)))
+    assert _tag_id(client, tag) in r["suggestion"]["tag_ids"]

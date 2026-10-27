@@ -163,6 +163,18 @@ MIGRATIONS: list[str] = [
         SELECT column1, (SELECT id FROM tag WHERE py_lower(name) = 'техническая')
         FROM (VALUES ('medium'), ('thinner'), ('thinners'), ('retarder'), ('flow'), ('improver'), ('diluent'));
     """,
+    # 6 — more label words: cleaners and putty -> "Техническая"; dipping inks -> "Чернила".
+    #     Only for tags that still have these names (a renamed tag is left alone).
+    """
+    INSERT OR IGNORE INTO tag_keyword (keyword, tag_id)
+        SELECT v.column1, t.id
+        FROM (VALUES ('cleaner'), ('cleaners'), ('putty'), ('filler'), ('restorer')) v
+        JOIN tag t ON py_lower(t.name) = 'техническая';
+    INSERT OR IGNORE INTO tag_keyword (keyword, tag_id)
+        SELECT v.column1, t.id
+        FROM (VALUES ('inks'), ('dipping'), ('dip'), ('quickshade')) v
+        JOIN tag t ON py_lower(t.name) = 'чернила';
+    """,
 ]
 
 # Starter tags: (name, plaque color, label keywords)
