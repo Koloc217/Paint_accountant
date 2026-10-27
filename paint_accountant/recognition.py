@@ -197,6 +197,19 @@ ALIASES = {
     "the army painter": "Army Painter",
     "army painter": "Army Painter",
     "acrylicos vallejo": "Vallejo",
+    # Vallejo product lines are printed bigger than the brand (its logo font often reads as "vaeo")
+    "model color": "Vallejo",
+    "model colour": "Vallejo",
+    "model air": "Vallejo",
+    "model wash": "Vallejo",
+    "game color": "Vallejo",
+    "game air": "Vallejo",
+    "game ink": "Vallejo",
+    "mecha color": "Vallejo",
+    "xpress color": "Vallejo",
+    "metal color": "Vallejo",
+    "panzer aces": "Vallejo",
+    "premium color": "Vallejo",
     "scale 75": "Scale75",
     "scalecolor": "Scale75",
 }
@@ -214,13 +227,22 @@ CODE_PATTERNS: list[tuple[str | None, re.Pattern, Any]] = [
 ]
 
 
-def find_code(text: str, manufacturer: str | None = None) -> str | None:
+# codes distinctive enough to tell the manufacturer when its name can't be read
+TELLING_CODES = {"Vallejo", "AK", "Army Painter", "Tamiya"}
+
+
+def find_code_with_maker(text: str, manufacturer: str | None = None) -> tuple[str | None, str | None]:
+    """The product code on the label and the manufacturer whose pattern it matched."""
     ordered = sorted(CODE_PATTERNS, key=lambda c: c[0] != manufacturer) if manufacturer else CODE_PATTERNS
-    for _, pattern, fmt in ordered:
+    for maker, pattern, fmt in ordered:
         m = pattern.search(text)
         if m:
-            return fmt(m)
-    return None
+            return fmt(m), maker
+    return None, None
+
+
+def find_code(text: str, manufacturer: str | None = None) -> str | None:
+    return find_code_with_maker(text, manufacturer)[0]
 
 
 def _nice_name(text: str) -> str:
@@ -298,14 +320,22 @@ def suggest(conn: sqlite3.Connection, reading: Reading) -> dict[str, Any]:
     for ln in maker_lines:
         ln.kind = "manufacturer"
 
-    code = find_code(full_text, maker["name"] if maker else None)
+    code, code_maker = find_code_with_maker(full_text, maker["name"] if maker else None)
+    if maker is None and code_maker in TELLING_CODES:
+        # "70.863" is Vallejo even when the logo is unreadable
+        maker = next((m for m in makers if norm(m["name"]) == norm(code_maker)), None)
 
+    code_line = None
     for ln in lines:
         if ln.kind != "other":
             continue
         words = norm(ln.text).split()
-        if code and find_code(ln.text) == code and len(words) <= 2:
-            ln.kind = "code"
+        if code and find_code(ln.text) == code:
+            code_line = ln
+        if code and code_line is ln and sum(c.isalpha() for c in ln.text) < 3:
+            ln.kind = "code"  # "70.863", "100 70.863"
+        elif len(norm(ln.text).replace(" ", "")) <= 2:
+            ln.kind = "noise"  # a logo read as letters: "AV" -> "NV"
         elif VOLUME.search(ln.text):
             ln.kind = "noise"  # "60ml (2.02 fl.oz.)"
         elif all(w in keyword_set or w in STOPWORDS or re.fullmatch(r"\d+(ml)?", w) for w in words):
@@ -319,6 +349,12 @@ def suggest(conn: sqlite3.Connection, reading: Reading) -> dict[str, Any]:
     # if every remaining line is made of tag words ("PAINT" / "REVITALIZER"), the biggest one is the name
     candidates = [ln for ln in lines if ln.kind == "other"] or [ln for ln in lines if ln.kind == "tag"]
     name_line = max(candidates, key=lambda ln: ln.height, default=None)
+    if code_line is not None:
+        # Vallejo and GSW print the name right after the code, on the same row: "70.863 GUNMETAL GREY"
+        beside = [ln for ln in candidates if ln is not code_line and ln.x > code_line.x
+                  and abs(ln.y - code_line.y) <= 0.5 * max(ln.height, code_line.height)]
+        if beside:
+            name_line = min(beside, key=lambda ln: ln.x)
     name_parts: list[Line] = []
     if name_line is not None:
         # a long name is often printed on two lines in the same size: "FLAT" / "BLACK",

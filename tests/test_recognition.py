@@ -280,8 +280,9 @@ def test_scale75_on_label(conn):
 
 
 def _real(lines):
-    """Lines as OCR read them from a real photo: (text, y, height)."""
-    return Reading(lines=[Line(text=t, score=0.95, x=50, y=y, height=hh) for t, y, hh in lines])
+    """Lines as OCR read them from a real photo: (text, y, height) or (text, x, y, height)."""
+    return Reading(lines=[Line(text=t[0], score=0.95, x=50 if len(t) == 3 else t[1], y=t[-2], height=t[-1])
+                          for t in lines])
 
 
 def test_green_stuff_world_stacked_brand_and_two_line_name(client, conn):
@@ -310,3 +311,41 @@ def test_brand_and_name_on_neighbouring_lines_stay_apart(conn):
     r = suggest(conn, _real([("CITADEL", 10, 30), ("NULN OIL", 45, 70)]))
     assert r["suggestion"]["manufacturer"]["name"] == "Citadel"
     assert r["suggestion"]["name"] == "Nuln Oil"
+
+
+# read from a real photo of Vallejo Model Color 70.863 Gunmetal Grey: the logo font of
+# "vallejo" comes out as "vaeo", the AV logo as "NV", the name is cut by the bottle's curve
+VALLEJO_MODEL_COLOR = [
+    ("100 70.863", 297, 420, 67), ("GUNMETA", 456, 425, 55), ("MODEL", 306, 486, 87),
+    ("COLOR", 309, 555, 78), ("acrylic-colors", 313, 617, 48), ("NV", 370, 697, 93),
+    ("vaeo", 371, 775, 46),
+]
+
+
+def test_vallejo_known_by_product_line_and_code(conn):
+    r = suggest(conn, _real(VALLEJO_MODEL_COLOR))
+    s = r["suggestion"]
+    assert s["manufacturer"]["name"] == "Vallejo"
+    assert s["code"] == "70.863"
+    assert s["name"] == "Gunmeta"  # the name next to the code, not the big logo
+    kinds = {ln["text"]: ln["kind"] for ln in r["lines"]}
+    assert kinds["MODEL"] == kinds["COLOR"] == "manufacturer"
+    assert kinds["NV"] == "noise"
+
+
+def test_vallejo_by_code_alone(conn):
+    r = suggest(conn, _real([("70.951", 10, 400, 40), ("WHITE", 200, 400, 40), ("vaeo", 50, 600, 30)]))
+    assert r["suggestion"]["manufacturer"]["name"] == "Vallejo"
+    assert r["suggestion"]["name"] == "White"
+
+
+def test_weak_code_does_not_pick_manufacturer(conn):
+    # "24-14" looks like a Citadel code but is too common to decide the brand on its own
+    r = suggest(conn, _real([("NULN OIL", 10, 70), ("24-14", 100, 20)]))
+    assert r["suggestion"]["manufacturer"] is None
+
+
+def test_known_paint_found_from_cut_name(client, conn):
+    client.post("/api/paints", json={"name": "Gunmetal Grey", "manufacturer": "Vallejo", "code": "70.863"})
+    r = suggest(conn, _real(VALLEJO_MODEL_COLOR))
+    assert r["matches"] and r["matches"][0]["paint"]["name"] == "Gunmetal Grey"
