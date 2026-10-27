@@ -45,6 +45,14 @@ Conn = Depends(get_conn)
 
 
 def _translate(exc: Exception) -> HTTPException:
+    if isinstance(exc, repo.DuplicateAtHand):
+        return HTTPException(status.HTTP_409_CONFLICT, {
+            "code": "duplicate_at_hand",
+            "message": str(exc),
+            "storage": exc.storage,
+            "have": exc.have,
+            "suggest": exc.suggest,
+        })
     if isinstance(exc, repo.NotFound):
         return HTTPException(status.HTTP_404_NOT_FOUND, str(exc))
     if isinstance(exc, repo.Conflict):
@@ -54,7 +62,7 @@ def _translate(exc: Exception) -> HTTPException:
     raise exc
 
 
-_DOMAIN_ERRORS = (repo.NotFound, repo.Conflict, repo.InvalidReference)
+_DOMAIN_ERRORS = (repo.NotFound, repo.Conflict, repo.InvalidReference, repo.DuplicateAtHand)
 
 
 @router.get("/health", tags=["system"])
@@ -106,17 +114,20 @@ def _target(body) -> object:
 @router.post("/paints", response_model=PaintCreated, status_code=201, tags=["paints"])
 def create_paint(body: PaintIn, conn: sqlite3.Connection = Conn):
     try:
-        return repo.create_paint(conn, body.model_dump(exclude={"storage_id"}), _target(body))
+        return repo.create_paint(
+            conn, body.model_dump(exclude={"storage_id", "allow_duplicate"}), _target(body), body.allow_duplicate
+        )
     except _DOMAIN_ERRORS as exc:
         raise _translate(exc)
 
 
 @router.post("/paints/{paint_id}/add", response_model=PotsResult, tags=["pots"])
 def add_pots(paint_id: int, body: PotsIn = PotsIn(), conn: sqlite3.Connection = Conn):
-    """Add pots. Without storage_id they go to the default storage; if that storage
-    already has this paint and has a copies storage, they go there instead."""
+    """Add pots. Without storage_id they go to the default storage.
+    A second pot of a paint in an "at hand" storage needs allow_duplicate=true; otherwise the answer
+    is 409 with detail.code "duplicate_at_hand", the storage, how many are there and a suggested storage."""
     try:
-        return repo.add_pots(conn, paint_id, body.count, _target(body))
+        return repo.add_pots(conn, paint_id, body.count, _target(body), body.allow_duplicate)
     except _DOMAIN_ERRORS as exc:
         raise _translate(exc)
 

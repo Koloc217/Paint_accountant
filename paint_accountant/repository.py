@@ -24,6 +24,16 @@ class InvalidReference(Exception):
     pass
 
 
+class DuplicateAtHand(Exception):
+    """Adding a pot to an "at hand" storage that already holds this paint — needs confirmation."""
+
+    def __init__(self, storage: dict, have: int, suggest: dict | None):
+        super().__init__(f"this paint is already in '{storage['name']}' ({have}); confirm with allow_duplicate")
+        self.storage = storage
+        self.have = have
+        self.suggest = suggest
+
+
 def register_functions(conn: sqlite3.Connection) -> None:
     conn.create_function(
         "py_lower", 1, lambda s: s.lower() if isinstance(s, str) else s, deterministic=True
@@ -511,11 +521,13 @@ def _storage_brief(conn: sqlite3.Connection, storage_id: int | None) -> dict | N
     return {"id": r["id"], "name": r["name"], "at_hand": bool(r["at_hand"])}
 
 
-def _add_pots(conn: sqlite3.Connection, paint_id: int, count: int, target: Any = AUTO) -> dict:
-    """Put `count` pots of a paint somewhere and say where they went.
+def _add_pots(conn: sqlite3.Connection, paint_id: int, count: int, target: Any = AUTO,
+              allow_duplicate: bool = False) -> dict:
+    """Put `count` pots of a paint into one storage and say where they went.
 
-    No storage given -> the default storage. If the target storage has a copies
-    storage and already holds this paint, the extra pots go to the copies storage.
+    No storage given -> the default storage. Any storage may hold several pots of a
+    paint, but for an "at hand" storage a second pot needs allow_duplicate — otherwise
+    DuplicateAtHand is raised, suggesting the storage's copies storage instead.
     The answer also lists storages that held this paint while the target didn't
     (to warn "you already have it in Box 1").
     """
@@ -524,38 +536,33 @@ def _add_pots(conn: sqlite3.Connection, paint_id: int, count: int, target: Any =
     else:
         _check_refs(conn, target, None)
 
+    have = _qty(conn, paint_id, target)
+    if target is not None and not allow_duplicate and have + count > 1:
+        row = conn.execute("SELECT at_hand, copies_storage_id FROM storage WHERE id = ?", (target,)).fetchone()
+        if row["at_hand"]:
+            raise DuplicateAtHand(_storage_brief(conn, target), have, _storage_brief(conn, row["copies_storage_id"]))
+
     already_in = []
-    if target is not None and _qty(conn, paint_id, target) == 0:
+    if target is not None and have == 0:
         for r in conn.execute(
             "SELECT storage_id, quantity FROM paint_location WHERE paint_id = ? AND storage_id IS NOT ?",
             (paint_id, target),
         ).fetchall():
             already_in.append({"storage": _storage_brief(conn, r["storage_id"]), "quantity": r["quantity"]})
 
-    copies_to = None
-    if target is not None:
-        row = conn.execute("SELECT copies_storage_id FROM storage WHERE id = ?", (target,)).fetchone()
-        copies_to = row["copies_storage_id"] if row else None
-
-    placed: dict[Any, int] = {}
-    for _ in range(count):
-        dest = target
-        if copies_to is not None and _qty(conn, paint_id, target) >= 1:
-            dest = copies_to
-        _change(conn, paint_id, dest, +1)
-        placed[dest] = placed.get(dest, 0) + 1
-
+    _change(conn, paint_id, target, +count)
     return {
         "action": "added",
-        "placed": [{"storage": _storage_brief(conn, sid), "count": n} for sid, n in placed.items()],
+        "placed": [{"storage": _storage_brief(conn, target), "count": count}],
         "already_in": already_in,
     }
 
 
-def add_pots(conn: sqlite3.Connection, paint_id: int, count: int = 1, storage_id: Any = AUTO) -> dict:
+def add_pots(conn: sqlite3.Connection, paint_id: int, count: int = 1, storage_id: Any = AUTO,
+             allow_duplicate: bool = False) -> dict:
     get_paint(conn, paint_id)
     with conn:
-        notice = _add_pots(conn, paint_id, count, storage_id)
+        notice = _add_pots(conn, paint_id, count, storage_id, allow_duplicate)
         conn.execute("UPDATE paint SET updated_at = datetime('now') WHERE id = ?", (paint_id,))
     return {"paint": get_paint(conn, paint_id), "notice": notice}
 
@@ -628,9 +635,11 @@ def move_pots(conn: sqlite3.Connection, paint_id: int, from_storage_id: int | No
 
 # ---------- create / update / delete ----------
 
-def create_paint(conn: sqlite3.Connection, data: dict, storage_id: Any = AUTO) -> dict:
-    """`storage_id` AUTO puts the pots by the default/copies rule; an explicit id
-    (or None for "no storage") puts all of them there."""
+def create_paint(conn: sqlite3.Connection, data: dict, storage_id: Any = AUTO,
+                 allow_duplicate: bool = False) -> dict:
+    """`storage_id` AUTO puts the pots into the default storage; an explicit id
+    (or None for "no storage") puts them there. Several pots into an "at hand"
+    storage need allow_duplicate."""
     with conn:
         _check_refs(conn, None if storage_id is AUTO else storage_id, data.get("tag_ids"))
         manufacturer_id = _resolve_manufacturer(conn, data.get("manufacturer_id"), data.get("manufacturer"))
@@ -644,7 +653,7 @@ def create_paint(conn: sqlite3.Connection, data: dict, storage_id: Any = AUTO) -
         notice = None
         quantity = data.get("quantity", 1)
         if quantity:
-            notice = _add_pots(conn, paint_id, quantity, storage_id)
+            notice = _add_pots(conn, paint_id, quantity, storage_id, allow_duplicate)
     return {**get_paint(conn, paint_id), "notice": notice}
 
 

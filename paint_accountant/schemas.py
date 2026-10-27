@@ -143,9 +143,9 @@ class PaintIn(BaseModel):
     quantity: int = Field(default=1, ge=0)
     storage_id: int | None = Field(
         default=None,
-        description="leave out to use the default storage (and its copies rule); "
-        "give an id to put all pots there; null = without a storage",
+        description="leave out to use the default storage; give an id to put the pots there; null = without a storage",
     )
+    allow_duplicate: bool = Field(False, description="allow several pots of this paint in an 'at hand' storage")
     tag_ids: list[int] = []
 
     _strip_code = field_validator("code", "barcode")(_strip_or_none)
@@ -224,8 +224,11 @@ class PotsIn(BaseModel):
     count: int = Field(default=1, ge=1, le=100)
     storage_id: int | None = Field(
         default=None,
-        description="leave out: adding goes to the default storage (copies rule applies), "
-        "removing takes from 'at hand' first; give an id (or null = without storage) to use that one",
+        description="leave out: adding goes to the default storage, removing takes from 'at hand' first; "
+        "give an id (or null = without storage) to use that one",
+    )
+    allow_duplicate: bool = Field(
+        False, description="adding: allow a second pot of this paint in an 'at hand' storage (else 409 duplicate_at_hand)"
     )
 
 

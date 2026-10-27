@@ -79,7 +79,7 @@ pytest
 
 - **Краски** — list with color swatches, search, filters by storage, manufacturer, tags, "at hand" and stock; quick +/− for the number of pots; add, edit, delete; manufacturer picked from a list, a new one can be added right in the form
 - **Хранилища** — boxes and drawers with paint and pot counts; each storage has a short link `http://<address>:8642/storage/<id>` to write into an NFC tag or a QR code
-- **Where pots lie** — a paint can be in several storages at once ("at hand 1, Запас 2"). New pots go to the **default** storage (on a new database: «Под рукой»). A storage can have a **copies storage**: when a pot of a paint it already holds is added, the extra pot goes there. Choosing a storage explicitly puts all pots there. Adding a paint to "at hand" warns if it's already in another storage; when "at hand" runs out, the app offers to take a pot from where it's left
+- **Where pots lie** — a paint can be in several storages at once ("at hand 1, Запас 2"), and any storage can hold several pots of a paint. When adding you pick a storage (the **default** one is preselected; on a new database it's «Под рукой»). Adding a second pot of a paint to an **"at hand"** storage asks first: put it there anyway, or into another storage (each storage can name one to suggest). Adding a paint that already lies elsewhere warns about it; when "at hand" runs out, the app offers to take a pot from where it's left. The paint list shows the total over all storages
 - **Справочники** — manufacturers (rename, add, delete unused ones) and tags (rename, recolor, add, delete). Starter manufacturers: AK, Citadel, Green Stuff World, Kaleido, Kimera, Tamiya, Vallejo
 
 No build step and no external libraries — plain HTML, CSS and JavaScript in `paint_accountant/web/`, so it works on a home network without internet.
@@ -91,13 +91,13 @@ No build step and no external libraries — plain HTML, CSS and JavaScript in `p
 | GET | `/api/paints` | list paints; filters: `q`, `barcode`, `manufacturer_id` or `manufacturer` (name), `storage_id`, `no_storage`, `tag_id` (repeatable), `at_hand`, `in_stock` |
 | POST | `/api/paints` | add a paint; give `manufacturer_id`, or `manufacturer` by name (a new name is added to the list) |
 | GET / PATCH / DELETE | `/api/paints/{id}` | read, change (name, manufacturer, code, barcode, color, tags), delete a paint |
-| POST | `/api/paints/{id}/add` | add pots: `{"count": 1}` uses the default storage and copies rule, `{"storage_id": N}` puts them there |
+| POST | `/api/paints/{id}/add` | add pots: `{"count": 1}` to the default storage, `{"storage_id": N}` there; a second pot in an "at hand" storage needs `"allow_duplicate": true`, else 409 `duplicate_at_hand` with a suggested storage |
 | POST | `/api/paints/{id}/remove` | a pot is used up: from "at hand" first, or from `storage_id` |
 | POST | `/api/paints/{id}/move` | `{"from_storage_id", "to_storage_id", "count"}` |
 | GET / POST | `/api/manufacturers` | list (with paint counts, `q` to filter) / add manufacturers |
 | PATCH / DELETE | `/api/manufacturers/{id}` | rename; delete only works when no paints use it |
 | GET / POST | `/api/storages` | list (with paint and pot counts) / add storages |
-| GET / PATCH / DELETE | `/api/storages/{id}` | settings include `is_default` and `copies_storage_id`; deleting keeps the pots, without a storage (the default one can't be deleted) |
+| GET / PATCH / DELETE | `/api/storages/{id}` | settings include `is_default` and `copies_storage_id` (storage suggested for duplicates); deleting keeps the pots, without a storage (the default one can't be deleted) |
 | GET / POST | `/api/tags` | list / add tags |
 | PATCH / DELETE | `/api/tags/{id}` | |
 | GET | `/api/recognize` | whether photo recognition is installed |

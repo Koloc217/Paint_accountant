@@ -1,4 +1,4 @@
-"""Where pots lie: the default storage, the copies rule, explicit storages, moving."""
+"""Where pots lie: the default storage, explicit storages, duplicates at hand, moving."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ def client(tmp_path):
 
 @pytest.fixture()
 def st(client):
-    """Storages: the default 'Под рукой' (copies go to 'Запас') and 'Коробка 1'."""
+    """Storages: the default 'Под рукой' (duplicates suggested to 'Запас') and 'Коробка 1'."""
     storages = {s["name"]: s for s in client.get("/api/storages").json()}
     hand = storages["Под рукой"]
     reserve = client.post("/api/storages", json={"name": "Запас"}).json()
@@ -37,47 +37,66 @@ def new_paint(client, **kw):
     return r.json()
 
 
-def test_first_pot_goes_at_hand_extra_pots_to_copies(client, st):
-    p = new_paint(client, quantity=3)
-    assert where(p) == {"Под рукой": 1, "Запас": 2}
-    assert {(x["storage"]["name"], x["count"]) for x in p["notice"]["placed"]} == {("Под рукой", 1), ("Запас", 2)}
-
-    r = client.post(f"/api/paints/{p['id']}/add").json()
-    assert where(r["paint"]) == {"Под рукой": 1, "Запас": 3}
-    assert r["notice"]["placed"] == [{"storage": {"id": st["reserve"], "name": "Запас", "at_hand": False}, "count": 1}]
+def dup(r):
+    assert r.status_code == 409, r.text
+    d = r.json()["detail"]
+    assert d["code"] == "duplicate_at_hand"
+    return d
 
 
-def test_explicit_storage_takes_everything(client, st):
+def test_second_pot_at_hand_needs_confirmation(client, st):
+    p = new_paint(client)
+    assert where(p) == {"Под рукой": 1}
+    assert [x["storage"]["name"] for x in p["notice"]["placed"]] == ["Под рукой"]
+
+    d = dup(client.post(f"/api/paints/{p['id']}/add"))
+    assert d["storage"]["name"] == "Под рукой" and d["have"] == 1
+    assert d["suggest"] == {"id": st["reserve"], "name": "Запас", "at_hand": False}
+    assert where(client.get(f"/api/paints/{p['id']}").json()) == {"Под рукой": 1}  # nothing changed
+
+    r = client.post(f"/api/paints/{p['id']}/add", json={"allow_duplicate": True}).json()
+    assert where(r["paint"]) == {"Под рукой": 2}
+
+    # or put it elsewhere, as suggested
+    r = client.post(f"/api/paints/{p['id']}/add", json={"storage_id": st["reserve"]}).json()
+    assert where(r["paint"]) == {"Под рукой": 2, "Запас": 1}
+
+
+def test_new_paint_with_several_pots_at_hand_needs_confirmation(client, st):
+    d = dup(client.post("/api/paints", json={"name": "Nuln Oil", "manufacturer": "Citadel", "quantity": 3}))
+    assert d["have"] == 0
+    assert client.get("/api/paints").json() == []  # nothing was created
+    p = new_paint(client, quantity=3, allow_duplicate=True)
+    assert where(p) == {"Под рукой": 3}
+
+
+def test_duplicates_anywhere_else_are_fine(client, st):
     p = new_paint(client, quantity=2, storage_id=st["box"])
     assert where(p) == {"Коробка 1": 2}
     r = client.post(f"/api/paints/{p['id']}/add", json={"storage_id": st["box"], "count": 2}).json()
     assert where(r["paint"]) == {"Коробка 1": 4}
 
 
-def test_warns_when_paint_is_elsewhere_but_not_at_hand(client, st):
+def test_warns_when_paint_is_elsewhere_but_not_here(client, st):
     p = new_paint(client, storage_id=st["box"])
     r = client.post(f"/api/paints/{p['id']}/add").json()
     assert where(r["paint"]) == {"Под рукой": 1, "Коробка 1": 1}
     assert [(x["storage"]["name"], x["quantity"]) for x in r["notice"]["already_in"]] == [("Коробка 1", 1)]
-    # already at hand now: no warning, the next pot is a copy
-    r = client.post(f"/api/paints/{p['id']}/add").json()
-    assert r["notice"]["already_in"] == []
-    assert where(r["paint"]) == {"Под рукой": 1, "Коробка 1": 1, "Запас": 1}
+    r = client.post(f"/api/paints/{p['id']}/add", json={"storage_id": st["box"]}).json()
+    assert r["notice"]["already_in"] == []  # already there: no warning
 
 
-def test_changing_copies_storage_only_affects_new_pots(client, st):
-    p = new_paint(client, quantity=2)
+def test_suggestion_follows_the_storage_setting(client, st):
+    p = new_paint(client)
     client.patch(f"/api/storages/{st['hand']}", json={"copies_storage_id": st["box"]})
-    r = client.post(f"/api/paints/{p['id']}/add").json()
-    assert where(r["paint"]) == {"Под рукой": 1, "Запас": 1, "Коробка 1": 1}
-    # copies rule off
+    assert dup(client.post(f"/api/paints/{p['id']}/add"))["suggest"]["name"] == "Коробка 1"
     client.patch(f"/api/storages/{st['hand']}", json={"copies_storage_id": None})
-    r = client.post(f"/api/paints/{p['id']}/add").json()
-    assert where(r["paint"])["Под рукой"] == 2
+    assert dup(client.post(f"/api/paints/{p['id']}/add"))["suggest"] is None
 
 
 def test_remove_takes_from_hand_first_and_offers_refill(client, st):
-    p = new_paint(client, quantity=3)  # hand 1, reserve 2
+    p = new_paint(client)  # hand 1
+    client.post(f"/api/paints/{p['id']}/add", json={"storage_id": st["reserve"], "count": 2})
     r = client.post(f"/api/paints/{p['id']}/remove").json()
     assert where(r["paint"]) == {"Запас": 2}
     assert [s["name"] for s in r["notice"]["emptied"]] == ["Под рукой"]
@@ -95,11 +114,11 @@ def test_remove_takes_from_hand_first_and_offers_refill(client, st):
     assert client.post(f"/api/paints/{p['id']}/remove").status_code == 409  # nothing left
 
 
-def test_move_ignores_copies_rule_and_checks_amounts(client, st):
+def test_move_is_not_asked_about_duplicates(client, st):
     p = new_paint(client, quantity=1, storage_id=st["box"])
-    r = client.post(f"/api/paints/{p['id']}/add").json()  # hand 1
+    client.post(f"/api/paints/{p['id']}/add")  # hand 1
     r = client.post(f"/api/paints/{p['id']}/move", json={"from_storage_id": st["box"], "to_storage_id": st["hand"]}).json()
-    assert where(r["paint"]) == {"Под рукой": 2}  # moved on purpose, so not redirected to copies
+    assert where(r["paint"]) == {"Под рукой": 2}  # moved on purpose
     bad = client.post(f"/api/paints/{p['id']}/move", json={"from_storage_id": st["box"], "to_storage_id": st["hand"]})
     assert bad.status_code == 409
     assert client.post(f"/api/paints/{p['id']}/move", json={"from_storage_id": st["hand"], "to_storage_id": 999}).status_code == 422
@@ -131,7 +150,8 @@ def test_deleting_storage_merges_pots_into_no_storage(client, st):
 
 
 def test_storage_counts_and_filters(client, st):
-    a = new_paint(client, quantity=3)               # hand 1, reserve 2
+    a = new_paint(client)                                                       # hand 1
+    client.post(f"/api/paints/{a['id']}/add", json={"storage_id": st["reserve"], "count": 2})  # reserve 2
     b = new_paint(client, name="Leadbelcher", storage_id=st["box"])
     storages = {s["name"]: s for s in client.get("/api/storages").json()}
     assert (storages["Запас"]["paint_count"], storages["Запас"]["pot_count"]) == (1, 2)

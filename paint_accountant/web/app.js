@@ -89,7 +89,7 @@ async function copyText(text) {
 // ======================= API =======================
 
 class ApiError extends Error {
-  constructor(status, message) { super(message); this.status = status; }
+  constructor(status, message, detail = null) { super(message); this.status = status; this.detail = detail; }
 }
 
 async function api(method, path, body) {
@@ -106,7 +106,8 @@ async function api(method, path, body) {
     let msg = `Ошибка ${res.status}`;
     if (typeof d === 'string') msg = d;
     else if (Array.isArray(d)) msg = d.map(e => (e.loc ? e.loc.slice(1).join('.') + ': ' : '') + e.msg).join('; ');
-    throw new ApiError(res.status, msg);
+    else if (d && typeof d === 'object') msg = d.message || msg;
+    throw new ApiError(res.status, msg, d && typeof d === 'object' && !Array.isArray(d) ? d : null);
   }
   return data;
 }
@@ -150,24 +151,76 @@ function toggleChip(label, { color, pressed, plain, onToggle }) {
   return b;
 }
 
-/** Modal "are you sure?" window. Resolves true if the user confirms. */
-function confirmDialog({ title, text = '', confirmLabel = 'Удалить' }) {
+/** Modal window with buttons. Resolves with the value of the pressed button, or null if dismissed. */
+function choiceDialog({ title, text = '', content = null, buttons }) {
   return new Promise(resolve => {
-    const cancel = h('button', { type: 'button', class: 'btn' }, 'Отмена');
-    const ok = h('button', { type: 'button', class: 'btn danger-solid' }, confirmLabel);
-    const dlg = h('dialog', { class: 'dialog', 'aria-labelledby': 'dlg-title' },
+    const dlg = h('dialog', { class: 'dialog', 'aria-labelledby': 'dlg-title' });
+    const close = result => { dlg.close(); dlg.remove(); resolve(result); };
+    const btns = buttons.map(b => h('button', { type: 'button', class: 'btn ' + (b.kind || ''), onclick: () => close(b.value) }, b.label));
+    dlg.append(
       h('h3', { id: 'dlg-title' }, title),
       text ? h('p', { class: 'muted' }, text) : null,
-      h('div', { class: 'dialog-actions' }, cancel, ok));
-    const close = result => { dlg.close(); dlg.remove(); resolve(result); };
-    cancel.addEventListener('click', () => close(false));
-    ok.addEventListener('click', () => close(true));
-    dlg.addEventListener('cancel', e => { e.preventDefault(); close(false); }); // Esc / back gesture
-    dlg.addEventListener('click', e => { if (e.target === dlg) close(false); }); // tap outside
+      content,
+      h('div', { class: 'dialog-actions' }, btns));
+    dlg.addEventListener('cancel', e => { e.preventDefault(); close(null); }); // Esc / back gesture
+    dlg.addEventListener('click', e => { if (e.target === dlg) close(null); }); // tap outside
     document.body.append(dlg);
     dlg.showModal();
-    cancel.focus();
+    btns[0].focus();
   });
+}
+
+/** Modal "are you sure?" window. Resolves true if the user confirms. */
+async function confirmDialog({ title, text = '', confirmLabel = 'Удалить' }) {
+  return (await choiceDialog({
+    title, text,
+    buttons: [{ label: 'Отмена', value: false }, { label: confirmLabel, value: true, kind: 'danger-solid' }],
+  })) === true;
+}
+
+/**
+ * A second pot of a paint in an "at hand" storage needs a yes. Asks where it should go.
+ * Resolves with extra fields for the request ({allow_duplicate} or {storage_id, allow_duplicate}),
+ * or null if the user cancelled.
+ */
+async function askAboutDuplicate(paintName, detail, count = 1) {
+  const storages = await api('GET', '/storages');
+  const others = storages.filter(s => s.id !== detail.storage.id);
+  const sel = h('select', { class: 'input', 'aria-label': 'Другое хранилище' },
+    others.map(s => h('option', { value: String(s.id) }, s.name + (s.at_hand ? ' · под рукой' : ''))),
+    h('option', { value: 'none' }, '— без хранилища —'));
+  const preferred = (detail.suggest && others.find(s => s.id === detail.suggest.id)) || others.find(s => !s.at_hand);
+  sel.value = preferred ? String(preferred.id) : 'none';
+  const choice = await choiceDialog({
+    title: detail.have
+      ? `«${paintName}» уже есть в «${detail.storage.name}» (${detail.have})`
+      : `${count} ${plural(count, 'банка', 'банки', 'банок')} «${paintName}» в «${detail.storage.name}»?`,
+    text: detail.have
+      ? 'Добавить ещё одну банку туда или положить в другое хранилище?'
+      : 'Положить их все под руку или в другое хранилище?',
+    content: h('div', { class: 'field' }, h('span', { class: 'label' }, 'Другое хранилище'), sel),
+    buttons: [
+      { label: 'Отмена', value: null },
+      { label: 'В выбранное', value: 'other' },
+      { label: `Да, в «${detail.storage.name}»`, value: 'here', kind: 'primary' },
+    ],
+  });
+  if (choice === 'here') return { allow_duplicate: true };
+  if (choice === 'other') return { storage_id: sel.value === 'none' ? null : Number(sel.value), allow_duplicate: true };
+  return null;
+}
+
+const isDuplicate = err => err instanceof ApiError && err.status === 409 && err.detail && err.detail.code === 'duplicate_at_hand';
+
+/** POST /paints/{id}/add, asking about a duplicate at hand when needed. Resolves null if cancelled. */
+async function addPots(paint, body = {}) {
+  try {
+    return await api('POST', `/paints/${paint.id}/add`, body);
+  } catch (err) {
+    if (!isDuplicate(err)) throw err;
+    const extra = await askAboutDuplicate(paint.name, err.detail, body.count || 1);
+    return extra ? api('POST', `/paints/${paint.id}/add`, { ...body, ...extra }) : null;
+  }
 }
 
 /** Delete button that asks for confirmation in a modal window. */
@@ -200,23 +253,20 @@ function locationsText(p) {
   }).join(', ');
 }
 
-/** Select "where to put pots": automatic (default storage + copies rule), a storage, or none. */
+/** Select "where to put pots": the storages (the default one preselected) or none. */
 function placementSelect(storages, selected, attrs = {}) {
   const def = storages.find(s => s.is_default);
-  const auto = def
-    ? `Автоматически: ${def.name}${def.copies_storage ? `, копии → ${def.copies_storage.name}` : ''}`
-    : 'Автоматически';
   const sel = h('select', { class: 'input', ...attrs },
-    h('option', { value: 'auto' }, auto),
-    storages.map(s => h('option', { value: String(s.id) }, s.name + (s.at_hand ? ' · под рукой' : ''))),
+    storages.map(s => h('option', { value: String(s.id) },
+      s.name + (s.is_default ? ' · по умолчанию' : s.at_hand ? ' · под рукой' : ''))),
     h('option', { value: 'none' }, '— без хранилища —'));
-  sel.value = selected == null ? 'auto' : String(selected);
+  const pick = selected != null ? selected : def ? def.id : null;
+  sel.value = pick == null ? 'none' : String(pick);
   return sel;
 }
 
-/** API body part for a placement select: nothing for automatic. */
+/** API body part for a placement select. */
 function placementBody(value) {
-  if (value === 'auto') return {};
   return { storage_id: value === 'none' ? null : Number(value) };
 }
 
@@ -296,7 +346,9 @@ function paintRow(p, storageId) {
   async function change(kind) {
     minus.disabled = plus.disabled = true;
     try {
-      const r = await api('POST', `/paints/${p.id}/${kind}`, storageId ? { storage_id: storageId } : {});
+      const body = storageId ? { storage_id: storageId } : {};
+      const r = kind === 'add' ? await addPots(p, body) : await api('POST', `/paints/${p.id}/remove`, body);
+      if (!r) { draw(p); return; } // cancelled
       showNotice(r.paint, r.notice);
       paintChanged(r.paint);
     } catch (e) {
@@ -359,7 +411,8 @@ function locationsEditor(paint, storages) {
 
   async function act(kind, body) {
     try {
-      const r = await api('POST', `/paints/${paint.id}/${kind}`, body);
+      const r = kind === 'add' ? await addPots(paint, body) : await api('POST', `/paints/${paint.id}/${kind}`, body);
+      if (!r) return; // cancelled
       showNotice(r.paint, r.notice);
       paintChanged(r.paint);
     } catch (err) {
@@ -732,7 +785,15 @@ async function viewPaintForm(mount, id, prefillStorage = null) {
     buttons.forEach(b => { b.disabled = true; });
     try {
       if (isNew) {
-        const created = await api('POST', '/paints', body);
+        let created;
+        try {
+          created = await api('POST', '/paints', body);
+        } catch (err) {
+          if (!isDuplicate(err)) throw err;
+          const extra = await askAboutDuplicate(body.name, err.detail, body.quantity);
+          if (!extra) return; // cancelled — stay on the form
+          created = await api('POST', '/paints', { ...body, ...extra });
+        }
         rememberManufacturer(created.manufacturer_id);
         if (created.notice) showNotice(created, created.notice);
         else toast(`«${created.name}» добавлена (0 банок)`, 'ok');
@@ -1146,7 +1207,8 @@ function photoRecognizer({ status, fill }) {
         if (s.barcode && !p.barcode) {
           await api('PATCH', `/paints/${p.id}`, { barcode: s.barcode }); // remember it for next time
         }
-        const r = await api('POST', `/paints/${p.id}/add`, fill.placement());
+        const r = await addPots(p, fill.placement());
+        if (!r) { plus.disabled = false; return; } // cancelled
         showNotice(r.paint, r.notice);
         if (onDone) { onDone(r.paint); return; } // live scanning goes on
         fill.clearForNext();
@@ -1227,7 +1289,7 @@ async function viewStorages(mount) {
           h('div', { class: 'name' }, s.name, ' ',
             s.is_default ? h('span', { class: 'badge' }, 'по умолчанию') : s.at_hand ? h('span', { class: 'badge' }, 'под рукой') : null),
           h('div', { class: 'muted small' }, `${countPaints(s.paint_count)} · ${countPots(s.pot_count)}`,
-            s.copies_storage ? ` · копии → ${s.copies_storage.name}` : '', s.nfc_tag ? ' · метка' : '')),
+            s.copies_storage ? ` · дубликаты → ${s.copies_storage.name}` : '', s.nfc_tag ? ' · метка' : '')),
         h('span', { class: 'chev' }, '›'))))
     : h('div', { class: 'empty' }, 'Хранилищ пока нет. Коробки, ящики, полки — всё, где лежат краски.');
 
@@ -1252,7 +1314,7 @@ async function viewStorage(mount, id) {
   const atHand = h('input', { type: 'checkbox', checked: s.at_hand });
   const isDefault = h('input', { type: 'checkbox', checked: s.is_default, disabled: s.is_default });
   const copies = h('select', { class: 'input', id: 's-copies' },
-    h('option', { value: '' }, '— не отправлять, класть сюда —'),
+    h('option', { value: '' }, '— не выбрано —'),
     storages.filter(x => x.id !== s.id).map(x => h('option', { value: String(x.id) }, x.name)));
   copies.value = s.copies_storage ? String(s.copies_storage.id) : '';
   const settings = h('form', { class: 'form' },
@@ -1264,8 +1326,8 @@ async function viewStorage(mount, id) {
       h('span', null, 'По умолчанию ', h('span', { class: 'muted small' }, s.is_default
         ? '— новые банки идут сюда. Чтобы снять, отметьте другое хранилище'
         : '— новые банки будут идти сюда'))),
-    h('div', { class: 'field' }, h('label', { for: 's-copies' }, 'Хранилище для копий'), copies,
-      h('div', { class: 'hint' }, 'Если сюда кладут краску, которая здесь уже есть, лишняя банка уйдёт в выбранное хранилище. Касается только новых банок.')),
+    h('div', { class: 'field' }, h('label', { for: 's-copies' }, 'Куда предлагать дубликаты'), copies,
+      h('div', { class: 'hint' }, 'Если хранилище «под рукой» и сюда кладут вторую банку той же краски, приложение спросит, куда её деть, — это хранилище будет выбрано заранее.')),
     h('div', { class: 'form-actions' },
       h('button', { type: 'submit', class: 'btn primary' }, 'Сохранить'),
       h('span', { class: 'spacer' }),
@@ -1299,7 +1361,7 @@ async function viewStorage(mount, id) {
   const updateSummary = () => {
     const pots = paints.reduce((n, p) => n + ((p.locations.find(l => l.storage && l.storage.id === s.id) || {}).quantity || 0), 0);
     summary.replaceChildren(h('span', null, `${countPaints(paints.length)} · ${countPots(pots)}`,
-      s.copies_storage ? ` · копии → ${s.copies_storage.name}` : ''));
+      s.copies_storage ? ` · дубликаты → ${s.copies_storage.name}` : ''));
   };
   updateSummary();
   document.addEventListener('paints-changed', updateSummary);
@@ -1321,7 +1383,7 @@ async function viewStorage(mount, id) {
         'Запишите эту ссылку в NFC-метку (например, приложением NFC Tools: «Записать» → «URL») или сделайте из неё QR-код. ',
         'Телефон в той же сети откроет это хранилище сразу.')),
     h('h2', null, 'Настройки'),
-    h('details', { class: 'panel' }, h('summary', null, 'Название, метка, по умолчанию, копии, удаление'), settings)));
+    h('details', { class: 'panel' }, h('summary', null, 'Название, метка, по умолчанию, дубликаты, удаление'), settings)));
 }
 
 // ======================= catalogs: manufacturers and tags =======================
