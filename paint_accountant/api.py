@@ -104,6 +104,7 @@ def list_paints(
     at_hand: bool | None = Query(None, description="only paints in (or not in) 'at hand' storages"),
     in_stock: bool | None = Query(None, description="true: quantity > 0, false: quantity = 0"),
     barcode: str | None = Query(None, description="exact barcode"),
+    uuid: list[str] = Query([], description="repeat to get several paints by their permanent uuid"),
     conn: sqlite3.Connection = Conn,
 ):
     return repo.list_paints(
@@ -117,6 +118,7 @@ def list_paints(
         at_hand=at_hand,
         in_stock=in_stock,
         barcode=barcode,
+        uuids=uuid,
     )
 
 
@@ -160,6 +162,15 @@ def move_pots(paint_id: int, body: MoveIn, conn: sqlite3.Connection = Conn):
     """Move pots from one storage to another (null = without a storage)."""
     try:
         return repo.move_pots(conn, paint_id, body.from_storage_id, body.to_storage_id, body.count)
+    except _DOMAIN_ERRORS as exc:
+        raise _translate(exc)
+
+
+@router.get("/paints/by-uuid/{paint_uuid}", response_model=Paint, tags=["paints"])
+def get_paint_by_uuid(paint_uuid: str, conn: sqlite3.Connection = Conn):
+    """The paint by its permanent uuid: use this from other apps instead of the numeric id."""
+    try:
+        return repo.get_paint_by_uuid(conn, paint_uuid)
     except _DOMAIN_ERRORS as exc:
         raise _translate(exc)
 

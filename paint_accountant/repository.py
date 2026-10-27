@@ -437,6 +437,7 @@ def _assemble_paints(conn: sqlite3.Connection, rows: list[sqlite3.Row]) -> list[
         result.append(
             {
                 "id": r["id"],
+                "uuid": r["uuid"],
                 "name": r["name"],
                 "manufacturer": r["manufacturer_name"],
                 "manufacturer_id": r["manufacturer_id"],
@@ -474,9 +475,14 @@ def list_paints(
     at_hand: bool | None = None,
     in_stock: bool | None = None,
     barcode: str | None = None,
+    uuids: list[str] | None = None,
 ) -> list[dict]:
     where: list[str] = []
     params: list[Any] = []
+    if uuids:
+        keys = sorted({u.strip().strip("{}").lower() for u in uuids if u.strip()})
+        where.append(f"p.uuid IN ({','.join('?' * len(keys))})")
+        params += keys
     if q and q.strip():
         where.append(
             "(py_lower(p.name) LIKE ? ESCAPE '\\' OR py_lower(m.name) LIKE ? ESCAPE '\\'"
@@ -518,6 +524,15 @@ def get_paint(conn: sqlite3.Connection, paint_id: int) -> dict:
     rows = conn.execute(_PAINT_SELECT + " WHERE p.id = ?", (paint_id,)).fetchall()
     if not rows:
         raise NotFound(f"paint {paint_id} not found")
+    return _assemble_paints(conn, rows)[0]
+
+
+def get_paint_by_uuid(conn: sqlite3.Connection, paint_uuid: str) -> dict:
+    """The permanent id other apps keep. Upper case and braces are accepted."""
+    key = paint_uuid.strip().strip("{}").lower()
+    rows = conn.execute(_PAINT_SELECT + " WHERE p.uuid = ?", (key,)).fetchall()
+    if not rows:
+        raise NotFound(f"paint {paint_uuid} not found")
     return _assemble_paints(conn, rows)[0]
 
 

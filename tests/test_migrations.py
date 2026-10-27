@@ -132,3 +132,96 @@ def test_technical_tag_not_duplicated_if_user_made_one(tmp_path):
     conn = db.connect(path)
     assert conn.execute("SELECT count(*) FROM tag WHERE lower(name) LIKE '%ическая'").fetchone()[0] == 1
     conn.close()
+
+
+_UUID_RE = r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+
+
+def _make_v10_with_paints(path):
+    conn = db.connect(path)
+    for n, script in enumerate(db.MIGRATIONS[:10], start=1):
+        conn.executescript(f"BEGIN; {script} PRAGMA user_version = {n}; COMMIT;")
+        if n == 1:
+            db._seed_tags(conn)
+    with conn:
+        citadel = conn.execute("SELECT id FROM manufacturer WHERE name = 'Citadel'").fetchone()[0]
+        box = conn.execute("INSERT INTO storage (name) VALUES ('Коробка 1')").lastrowid
+        conn.executemany(
+            "INSERT INTO paint (id, name, manufacturer_id, code, barcode, hex) VALUES (?,?,?,?,?,?)",
+            [(1, "Nuln Oil", citadel, "24-14", "501", "#1d1d1d"), (2, "Leadbelcher", citadel, None, None, None),
+             (7, "Retributor", citadel, None, None, None)],  # ids with a gap stay as they are
+        )
+        conn.executemany("INSERT INTO paint_location (paint_id, storage_id, quantity) VALUES (?,?,?)",
+                         [(1, box, 2), (7, None, 1)])
+        conn.execute("INSERT INTO paint_tag (paint_id, tag_id) VALUES (1, 5)")
+    conn.close()
+
+
+def test_v10_to_v11_gives_every_paint_a_uuid_and_keeps_the_rest(tmp_path):
+    import re
+
+    path = tmp_path / "paints.sqlite3"
+    _make_v10_with_paints(path)
+
+    db.init_db(path)
+
+    conn = db.connect(path)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == len(db.MIGRATIONS)
+    rows = conn.execute("SELECT id, uuid, name, code, barcode, hex FROM paint ORDER BY id").fetchall()
+    assert [(r["id"], r["name"], r["code"], r["barcode"], r["hex"]) for r in rows] == [
+        (1, "Nuln Oil", "24-14", "501", "#1d1d1d"), (2, "Leadbelcher", None, None, None),
+        (7, "Retributor", None, None, None),
+    ]
+    uuids = [r["uuid"] for r in rows]
+    assert all(re.match(_UUID_RE, u) for u in uuids), uuids
+    assert len(set(uuids)) == 3
+    # pots and tags still point to the right paints
+    assert {tuple(r) for r in conn.execute("SELECT paint_id, quantity FROM paint_location")} == {(1, 2), (7, 1)}
+    assert conn.execute("SELECT paint_id FROM paint_tag").fetchall()[0][0] == 1
+    assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+    conn.close()
+
+    # a copy of the old database was left next to it, untouched
+    backup = tmp_path / "paints.before-v10.sqlite3"
+    assert backup.exists()
+    old = sqlite3.connect(backup)
+    assert old.execute("PRAGMA user_version").fetchone()[0] == 10
+    assert old.execute("SELECT count(*) FROM paint").fetchone()[0] == 3
+    old.close()
+
+    db.init_db(path)  # second start: uuids don't change
+    conn = db.connect(path)
+    assert [r[0] for r in conn.execute("SELECT uuid FROM paint ORDER BY id")] == uuids
+    conn.close()
+
+
+def test_uuid_is_given_on_insert_and_cannot_change(tmp_path):
+    import re
+
+    path = tmp_path / "paints.sqlite3"
+    db.init_db(path)
+    assert not list(tmp_path.glob("*.before-*"))  # fresh database: nothing to back up
+    conn = db.connect(path)
+    with conn:
+        maker = conn.execute("SELECT id FROM manufacturer LIMIT 1").fetchone()[0]
+        conn.executemany("INSERT INTO paint (name, manufacturer_id) VALUES (?, ?)",
+                         [(f"Paint {i}", maker) for i in range(200)])
+    uuids = [r[0] for r in conn.execute("SELECT uuid FROM paint ORDER BY id")]
+    assert len(set(uuids)) == 200 and all(re.match(_UUID_RE, u) for u in uuids)
+
+    with pytest.raises(sqlite3.IntegrityError, match="cannot be changed"):
+        with conn:
+            conn.execute("UPDATE paint SET uuid = '00000000-0000-4000-8000-000000000000' WHERE id = 1")
+    with conn:  # other columns still change freely
+        conn.execute("UPDATE paint SET name = 'Renamed', uuid = uuid WHERE id = 1")
+    assert conn.execute("SELECT uuid FROM paint WHERE id = 1").fetchone()[0] == uuids[0]
+
+    # an import may bring its own uuid, but not one that is taken
+    with conn:
+        conn.execute("INSERT INTO paint (name, manufacturer_id, uuid) VALUES ('Imported', ?, ?)",
+                     (maker, "11111111-2222-4333-8444-555555555555"))
+    with pytest.raises(sqlite3.IntegrityError):
+        with conn:
+            conn.execute("INSERT INTO paint (name, manufacturer_id, uuid) VALUES ('Again', ?, ?)",
+                         (maker, uuids[1]))
+    conn.close()

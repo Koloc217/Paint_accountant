@@ -91,9 +91,10 @@ No build step and no external libraries — plain HTML, CSS and JavaScript in `p
 
 | Method | Path | What it does |
 |---|---|---|
-| GET | `/api/paints` | list paints; filters: `q`, `barcode`, `manufacturer_id` or `manufacturer` (name), `storage_id`, `no_storage`, `tag_id` (repeatable), `at_hand`, `in_stock` |
+| GET | `/api/paints` | list paints; filters: `q`, `barcode`, `uuid` (repeatable), `manufacturer_id` or `manufacturer` (name), `storage_id`, `no_storage`, `tag_id` (repeatable), `at_hand`, `in_stock` |
 | POST | `/api/paints` | add a paint; give `manufacturer_id`, or `manufacturer` by name (a new name is added to the list) |
 | GET / PATCH / DELETE | `/api/paints/{id}` | read, change (name, manufacturer, code, barcode, color, tags), delete a paint |
+| GET | `/api/paints/by-uuid/{uuid}` | read a paint by its permanent `uuid` |
 | POST | `/api/paints/{id}/add` | add pots: `{"count": 1}` to the default storage, `{"storage_id": N}` there; a second pot in an "at hand" storage needs `"allow_duplicate": true`, else 409 `duplicate_at_hand` with a suggested storage |
 | POST | `/api/paints/{id}/remove` | a pot is used up: from "at hand" first, or from `storage_id` |
 | POST | `/api/paints/{id}/move` | `{"from_storage_id", "to_storage_id", "count"}` |
@@ -106,6 +107,10 @@ No build step and no external libraries — plain HTML, CSS and JavaScript in `p
 | GET | `/api/recognize` | whether photo recognition is installed |
 | POST | `/api/recognize` | send a photo as the body (`Content-Type: image/jpeg`); returns label text, barcodes, form suggestions and matching paints; `?barcode_only=true` skips text (for live camera frames) |
 | GET | `/api/health` | status and schema version |
+
+Every paint has two ids. `id` is a short number for this app's pages and API calls. `uuid` is given once when the paint is added and never changes, even when the database is rebuilt or merged: other apps (a project tracker, a script) should keep the `uuid` and look paints up by it.
+
+When a new version changes the database schema, the old file is copied first, next to it: `paints.before-v10.sqlite3` is the database as it was at schema 10. Delete these copies once the new version works for you.
 
 Full details at `/docs` on a running server.
 

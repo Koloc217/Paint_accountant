@@ -202,6 +202,7 @@ class TagRef(BaseModel):
 
 class Paint(BaseModel):
     id: int
+    uuid: str = Field(description="permanent id for links from other apps; never changes")
     name: str
     manufacturer: str
     manufacturer_id: int

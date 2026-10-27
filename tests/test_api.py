@@ -184,3 +184,23 @@ def test_manufacturer_crud(client):
     client.delete(f"/api/paints/{p['id']}")
     assert client.delete(f"/api/manufacturers/{m['id']}").status_code == 204
     assert client.delete(f"/api/manufacturers/{m['id']}").status_code == 404
+
+
+def test_paint_has_permanent_uuid_and_can_be_found_by_it(client):
+    a = _paint(client)
+    b = _paint(client, name="Nuln Oil")
+    assert len(a["uuid"]) == 36 and a["uuid"] != b["uuid"]
+
+    got = client.get(f"/api/paints/by-uuid/{a['uuid']}")
+    assert got.status_code == 200 and got.json()["id"] == a["id"]
+    # upper case and braces, as some tools write them
+    assert client.get(f"/api/paints/by-uuid/{{{a['uuid'].upper()}}}").json()["id"] == a["id"]
+    assert client.get("/api/paints/by-uuid/00000000-0000-4000-8000-000000000000").status_code == 404
+
+    # editing doesn't touch it, and a uuid sent in a patch is ignored
+    patched = client.patch(f"/api/paints/{a['id']}", json={"name": "Evil Sunz Scarlet", "uuid": b["uuid"]}).json()
+    assert patched["uuid"] == a["uuid"]
+
+    several = client.get("/api/paints", params=[("uuid", a["uuid"]), ("uuid", b["uuid"].upper())]).json()
+    assert {p["id"] for p in several} == {a["id"], b["id"]}
+    assert client.get("/api/paints", params={"uuid": a["uuid"]}).json()[0]["id"] == a["id"]

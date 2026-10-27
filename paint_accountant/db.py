@@ -12,6 +12,14 @@ from pathlib import Path
 
 from .repository import register_functions
 
+# A random UUID (version 4, lower case) in plain SQL, so a paint added by any
+# means — the app, the sqlite3 console, a script — gets one from the column default.
+UUID4_SQL = (
+    "lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || "
+    "substr(lower(hex(randomblob(2))), 2) || '-' || substr('89ab', 1 + (random() & 3), 1) || "
+    "substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6)))"
+)
+
 MIGRATIONS: list[str] = [
     # 1 — initial schema
     """
@@ -202,6 +210,36 @@ MIGRATIONS: list[str] = [
         FROM (VALUES ('revitalizer'), ('revitalizador')) v
         JOIN tag t ON py_lower(t.name) = 'техническая';
     """,
+    # 11 — every paint gets a uuid: a permanent id for links from other apps
+    #      (Project Hub and the like). Unlike `id` it never changes and does not
+    #      repeat after a database is rebuilt or merged. Existing paints get a
+    #      new random one; ids, pots and tags stay as they were.
+    f"""
+    CREATE TABLE paint_new (
+        id              INTEGER PRIMARY KEY,
+        uuid            TEXT    NOT NULL DEFAULT ({UUID4_SQL}) CHECK (length(uuid) = 36 AND uuid = lower(uuid)),
+        name            TEXT    NOT NULL,
+        manufacturer_id INTEGER NOT NULL REFERENCES manufacturer (id) ON DELETE RESTRICT,
+        code            TEXT,
+        barcode         TEXT,
+        hex             TEXT    CHECK (hex IS NULL OR hex GLOB '#[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]'),
+        created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+        updated_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+    INSERT INTO paint_new (id, name, manufacturer_id, code, barcode, hex, created_at, updated_at)
+        SELECT id, name, manufacturer_id, code, barcode, hex, created_at, updated_at FROM paint ORDER BY id;
+    DROP TABLE paint;
+    ALTER TABLE paint_new RENAME TO paint;
+    CREATE UNIQUE INDEX paint_uuid_uq ON paint (uuid);
+    CREATE UNIQUE INDEX paint_identity_uq ON paint (manufacturer_id, name COLLATE NOCASE, ifnull(code, ''));
+    CREATE INDEX paint_manufacturer_ix ON paint (manufacturer_id);
+    CREATE UNIQUE INDEX paint_barcode_uq ON paint (barcode) WHERE barcode IS NOT NULL;
+
+    -- links from other apps rely on it, so it can't be changed once given
+    CREATE TRIGGER paint_uuid_fixed BEFORE UPDATE OF uuid ON paint
+        WHEN NEW.uuid IS NOT OLD.uuid
+        BEGIN SELECT RAISE(ABORT, 'paint uuid cannot be changed'); END;
+    """,
 ]
 
 # Starter tags: (name, plaque color, label keywords)
@@ -241,6 +279,8 @@ def init_db(db_path: Path) -> None:
             )
         if version == len(MIGRATIONS):
             return
+        if version > 0:
+            backup_before_migration(conn, db_path, version)
         # Rebuilding a table (DROP + RENAME) with foreign keys on would cascade-delete
         # rows that point to it, so they are off while migrating and checked afterwards.
         conn.execute("PRAGMA foreign_keys = OFF")
@@ -258,6 +298,19 @@ def init_db(db_path: Path) -> None:
             raise RuntimeError(f"Database migration left broken references: {[tuple(r) for r in problems]}")
     finally:
         conn.close()
+
+
+def backup_before_migration(conn: sqlite3.Connection, db_path: Path, version: int) -> Path:
+    """Copy the database next to it before the schema changes: paints.sqlite3 ->
+    paints.before-v10.sqlite3. An existing copy for the same version is kept as is."""
+    target = db_path.with_name(f"{db_path.stem}.before-v{version}{db_path.suffix}")
+    if not target.exists():
+        dest = sqlite3.connect(target)
+        try:
+            conn.backup(dest)  # consistent copy even in WAL mode
+        finally:
+            dest.close()
+    return target
 
 
 def _seed_tags(conn: sqlite3.Connection) -> None:
