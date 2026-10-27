@@ -79,6 +79,22 @@ _TAG_PAINTS = """SELECT pt.tag_id, p.manufacturer_id, p.name, p.code
                  FROM paint_tag pt JOIN paint p ON p.id = pt.paint_id"""
 
 
+# ======================= settings =======================
+
+def get_setting(conn: sqlite3.Connection, key: str) -> str | None:
+    row = conn.execute("SELECT value FROM setting WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else None
+
+
+def set_setting(conn: sqlite3.Connection, key: str, value: str | None) -> None:
+    """Part of the caller's transaction: call inside `with conn:`."""
+    if value is None:
+        conn.execute("DELETE FROM setting WHERE key = ?", (key,))
+    else:
+        conn.execute("INSERT INTO setting (key, value) VALUES (?, ?) "
+                     "ON CONFLICT (key) DO UPDATE SET value = excluded.value", (key, value))
+
+
 # ======================= storages =======================
 
 _STORAGE_SELECT = """

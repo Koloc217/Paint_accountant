@@ -21,7 +21,7 @@ pip install -r requirements.txt
 python run.py
 ```
 
-On start it prints the addresses to open — `http://localhost:8642/` on this computer and `http://<your-LAN-IP>:8642/` from a phone on the same network. The web UI is in Russian and works on phones and desktops, in light and dark mode. The REST API docs are at `/docs`.
+On start it prints the addresses to open — `http://localhost:8642/` on this computer and `http://<your-LAN-IP>:8642/` from a phone on the same network. The web UI is in Russian and English (picked from the browser language, switchable per device in ⚙ Settings) and works on phones and desktops, in light and dark mode. The REST API docs are at `/docs`.
 
 On Windows, allow Python through the firewall for **private networks** when asked, otherwise the phone won't reach the server. If `python` opens the Microsoft Store, use `py` instead, or turn off the `python.exe` alias in Settings → Apps → Advanced app settings → App execution aliases.
 
@@ -71,6 +71,14 @@ Tips: shoot the label close up, straight on, in good light, without glare. Once 
 
 On a computer there is just an upload button.
 
+### Sign-in (optional)
+
+Off by default: anyone on your home network can open the app. To ask for a password, open **⚙ Settings → Password sign-in**, set a password for the user `admin` and turn it on. The device you did it from stays signed in; other phones and computers sign in once and stay signed in for a year. Changing the password signs everyone else out. Without signing in, the API and `/docs` answer 401; QR and NFC links lead to the login screen and back to the storage.
+
+The password is stored as a salted hash; after 5 wrong tries in a row an address waits a minute. Over plain `http` it travels unencrypted, so don't reuse an important password.
+
+Forgot it? Stop the app and run `python run.py --reset-auth` — sign-in turns off, set a new password in Settings.
+
 ### Running the tests
 
 ```bash
@@ -106,6 +114,11 @@ No build step and no external libraries — plain HTML, CSS and JavaScript in `p
 | PATCH / DELETE | `/api/tags/{id}` | |
 | GET | `/api/recognize` | whether photo recognition is installed |
 | POST | `/api/recognize` | send a photo as the body (`Content-Type: image/jpeg`); returns label text, barcodes, form suggestions and matching paints; `?barcode_only=true` skips text (for live camera frames) |
+| GET | `/api/qr.svg?data=…` | QR code as SVG (for storage labels) |
+| GET | `/api/auth` | whether sign-in is on and this device is signed in |
+| POST | `/api/auth/login` · `/api/auth/logout` | `{"password": "…"}`; sets / clears the session cookie |
+| POST | `/api/auth/password` | turn sign-in on or change the password (`{"password": "…"}`, at least 4 characters) |
+| POST | `/api/auth/disable` | turn sign-in off |
 | GET | `/api/health` | status and schema version |
 
 Every paint has two ids. `id` is a short number for this app's pages and API calls. `uuid` is given once when the paint is added and never changes, even when the database is rebuilt or merged: other apps (a project tracker, a script) should keep the `uuid` and look paints up by it.

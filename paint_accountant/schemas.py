@@ -243,3 +243,11 @@ class MoveIn(BaseModel):
 class PotsResult(BaseModel):
     paint: Paint
     notice: dict
+
+
+class PasswordIn(BaseModel):
+    password: str = Field(..., min_length=1, max_length=200)
+
+
+class NewPasswordIn(BaseModel):
+    password: str = Field(..., min_length=4, max_length=200, description="at least 4 characters")

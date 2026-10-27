@@ -14,14 +14,16 @@
   <div class="topbar-inner">
     <a class="brand" href="#/"><img src="/static/icon.svg?v=__V__" alt="" width="22" height="22"> Paint Accountant</a>
     <nav class="tabs">
-      <a href="#/" data-tab="paints">Краски</a>
-      <a href="#/storages" data-tab="storages">Хранилища</a>
-      <a href="#/catalogs" data-tab="catalogs">Справочники</a>
+      <a href="#/" data-tab="paints" data-i18n="Краски">Краски</a>
+      <a href="#/storages" data-tab="storages" data-i18n="Хранилища">Хранилища</a>
+      <a href="#/catalogs" data-tab="catalogs" data-i18n="Справочники">Справочники</a>
+      <a href="#/settings" data-tab="settings" class="tab-icon" title="Настройки" data-i18n-label="Настройки" aria-label="Настройки">⚙</a>
     </nav>
   </div>
 </header>
 <main id="view"></main>
 <div id="toast" role="status" aria-live="polite"></div>
+<script src="/static/i18n.js?v=__V__"></script>
 <script src="/static/app.js?v=__V__"></script>
 </body>
 </html>

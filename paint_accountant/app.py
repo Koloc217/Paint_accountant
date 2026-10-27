@@ -9,6 +9,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
+from . import auth_api
 from .api import router
 from .config import Settings, load_settings
 from .db import init_db
@@ -30,6 +31,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="Paint Accountant", version=__version__)
     app.state.settings = settings
     app.include_router(router)
+    app.include_router(auth_api.router)
+    auth_api.install(app)
     app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 
     @app.get("/", include_in_schema=False)

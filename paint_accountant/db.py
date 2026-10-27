@@ -240,6 +240,13 @@ MIGRATIONS: list[str] = [
         WHEN NEW.uuid IS NOT OLD.uuid
         BEGIN SELECT RAISE(ABORT, 'paint uuid cannot be changed'); END;
     """,
+    # 12 — app-wide settings (sign-in with a password and the like)
+    """
+    CREATE TABLE setting (
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    );
+    """,
 ]
 
 # Starter tags: (name, plaque color, label keywords)

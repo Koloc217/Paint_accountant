@@ -37,12 +37,14 @@ function plural(n, one, few, many) {
   return many;
 }
 
-const countPaints = n => `${n} ${plural(n, 'краска', 'краски', 'красок')}`;
-const countPots = n => `${n} ${plural(n, 'банка', 'банки', 'банок')}`;
+const countPaints = n => (LANG === 'en' ? `${n} ${n === 1 ? 'paint' : 'paints'}`
+  : `${n} ${plural(n, 'краска', 'краски', 'красок')}`);
+const countPots = n => (LANG === 'en' ? `${n} ${n === 1 ? 'pot' : 'pots'}`
+  : `${n} ${plural(n, 'банка', 'банки', 'банок')}`);
 
 function debounce(fn, ms) {
-  let t;
-  return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+  let tg;
+  return (...args) => { clearTimeout(tg); tg = setTimeout(() => fn(...args), ms); };
 }
 
 function toast(message, kind = '', action = null) {
@@ -103,20 +105,21 @@ async function api(method, path, body) {
   const data = await res.json().catch(() => null);
   if (!res.ok) {
     const d = data && data.detail;
-    let msg = `Ошибка ${res.status}`;
+    let msg = t('Ошибка {0}', res.status);
     if (typeof d === 'string') msg = d;
     else if (Array.isArray(d)) msg = d.map(e => (e.loc ? e.loc.slice(1).join('.') + ': ' : '') + e.msg).join('; ');
     else if (d && typeof d === 'object') msg = d.message || msg;
+    if (res.status === 401 && d && d.code === 'auth_required') goToLogin();
     throw new ApiError(res.status, msg, d && typeof d === 'object' && !Array.isArray(d) ? d : null);
   }
   return data;
 }
 
 function explain(err, conflictText) {
-  if (!(err instanceof ApiError)) return 'Нет связи с сервером';
+  if (!(err instanceof ApiError)) return t('Нет связи с сервером');
   if (err.status === 409 && conflictText) return conflictText;
-  if (err.status === 404) return 'Не найдено — возможно, уже удалено';
-  if (err.status === 422) return 'Проверьте поля: ' + err.message;
+  if (err.status === 404) return t('Не найдено — возможно, уже удалено');
+  if (err.status === 422) return t('Проверьте поля: ') + err.message;
   return err.message;
 }
 
@@ -126,14 +129,14 @@ function swatch(hex, big = false) {
   return h('span', {
     class: 'swatch' + (hex ? '' : ' no-color') + (big ? ' big' : ''),
     style: hex ? `--c:${hex}` : null,
-    title: hex || 'цвет не задан',
+    title: hex || t('цвет не задан'),
   });
 }
 
 function setSwatch(el, hex) {
   el.classList.toggle('no-color', !hex);
   el.style.cssText = hex ? `--c:${hex}` : '';
-  el.title = hex || 'цвет не задан';
+  el.title = hex || t('цвет не задан');
 }
 
 function toggleChip(label, { color, pressed, plain, onToggle }) {
@@ -171,10 +174,10 @@ function choiceDialog({ title, text = '', content = null, buttons }) {
 }
 
 /** Modal "are you sure?" window. Resolves true if the user confirms. */
-async function confirmDialog({ title, text = '', confirmLabel = 'Удалить' }) {
+async function confirmDialog({ title, text = '', confirmLabel = t('Удалить') }) {
   return (await choiceDialog({
     title, text,
-    buttons: [{ label: 'Отмена', value: false }, { label: confirmLabel, value: true, kind: 'danger-solid' }],
+    buttons: [{ label: t('Отмена'), value: false }, { label: confirmLabel, value: true, kind: 'danger-solid' }],
   })) === true;
 }
 
@@ -186,23 +189,23 @@ async function confirmDialog({ title, text = '', confirmLabel = 'Удалить'
 async function askAboutDuplicate(paintName, detail, count = 1) {
   const storages = await api('GET', '/storages');
   const others = storages.filter(s => s.id !== detail.storage.id);
-  const sel = h('select', { class: 'input', 'aria-label': 'Другое хранилище' },
-    others.map(s => h('option', { value: String(s.id) }, s.name + (s.at_hand ? ' · под рукой' : ''))),
-    h('option', { value: 'none' }, '— без хранилища —'));
+  const sel = h('select', { class: 'input', 'aria-label': t('Другое хранилище') },
+    others.map(s => h('option', { value: String(s.id) }, s.name + (s.at_hand ? t(' · под рукой') : ''))),
+    h('option', { value: 'none' }, t('— без хранилища —')));
   const preferred = (detail.suggest && others.find(s => s.id === detail.suggest.id)) || others.find(s => !s.at_hand);
   sel.value = preferred ? String(preferred.id) : 'none';
   const choice = await choiceDialog({
     title: detail.have
-      ? `«${paintName}» уже есть в «${detail.storage.name}» (${detail.have})`
-      : `${count} ${plural(count, 'банка', 'банки', 'банок')} «${paintName}» в «${detail.storage.name}»?`,
+      ? t('«{0}» уже есть в «{1}» ({2})', paintName, detail.storage.name, detail.have)
+      : t('{0} «{1}» в «{2}»?', countPots(count), paintName, detail.storage.name),
     text: detail.have
-      ? 'Добавить ещё одну банку туда или положить в другое хранилище?'
-      : 'Положить их все под руку или в другое хранилище?',
-    content: h('div', { class: 'field' }, h('span', { class: 'label' }, 'Другое хранилище'), sel),
+      ? t('Добавить ещё одну банку туда или положить в другое хранилище?')
+      : t('Положить их все под руку или в другое хранилище?'),
+    content: h('div', { class: 'field' }, h('span', { class: 'label' }, t('Другое хранилище')), sel),
     buttons: [
-      { label: 'Отмена', value: null },
-      { label: 'В выбранное', value: 'other' },
-      { label: `Да, в «${detail.storage.name}»`, value: 'here', kind: 'primary' },
+      { label: t('Отмена'), value: null },
+      { label: t('В выбранное'), value: 'other' },
+      { label: t('Да, в «{0}»', detail.storage.name), value: 'here', kind: 'primary' },
     ],
   });
   if (choice === 'here') return { allow_duplicate: true };
@@ -237,18 +240,18 @@ function deleteButton(label, question, onConfirm) {
 
 function pageHead(title, backHref, extra) {
   return h('div', { class: 'page-head' },
-    backHref ? h('a', { class: 'back', href: backHref, 'aria-label': 'Назад' }, '‹') : null,
+    backHref ? h('a', { class: 'back', href: backHref, 'aria-label': t('Назад') }, '‹') : null,
     h('h1', null, title),
     extra);
 }
 
-const storageName = st => (st ? `«${st.name}»` : 'без хранилища');
+const storageName = st => (st ? t('«{0}»', st.name) : t('без хранилища'));
 
 /** "Под рукой ✋, Запас 2" — where the pots of a paint lie. */
 function locationsText(p) {
-  if (!p.locations.length) return 'нет в наличии';
+  if (!p.locations.length) return t('нет в наличии');
   return p.locations.map(l => {
-    const label = l.storage ? l.storage.name + (l.storage.at_hand ? ' ✋' : '') : 'без хранилища';
+    const label = l.storage ? l.storage.name + (l.storage.at_hand ? ' ✋' : '') : t('без хранилища');
     return p.locations.length > 1 || l.quantity > 1 ? `${label} ${l.quantity}` : label;
   }).join(', ');
 }
@@ -258,7 +261,7 @@ function placementSelect(storages, selected, attrs = {}) {
   const def = storages.find(s => s.is_default);
   const sel = h('select', { class: 'input', ...attrs },
     storages.map(s => h('option', { value: String(s.id) }, s.name + (s.at_hand ? ' ✋' : ''))),
-    h('option', { value: 'none' }, '— без хранилища —'));
+    h('option', { value: 'none' }, t('— без хранилища —')));
   const pick = selected != null ? selected : def ? def.id : null;
   sel.value = pick == null ? 'none' : String(pick);
   return sel;
@@ -276,17 +279,17 @@ function showNotice(paint, notice) {
     const parts = notice.placed.map(x => `+${x.count} → ${storageName(x.storage)}`).join(', ');
     if (notice.already_in.length) {
       const where = notice.already_in.map(x => `${storageName(x.storage)} (${x.quantity})`).join(', ');
-      toast(`${paint.name}: ${parts}. Уже есть в ${where}`, 'warn');
+      toast(t('{0}: {1}. Уже есть в {2}', paint.name, parts, where), 'warn');
     } else {
       toast(`${paint.name}: ${parts}`, 'ok');
     }
   } else if (notice.action === 'removed') {
-    const taken = notice.taken.map(x => `−${x.count} из ${storageName(x.storage)}`).join(', ');
+    const taken = notice.taken.map(x => t('−{0} из {1}', x.count, storageName(x.storage))).join(', ');
     const src = notice.refill_from[0];
     const dst = notice.emptied[0];
     if (src && dst) {
-      toast(`${paint.name}: ${taken}. Под рукой закончилась, есть в ${storageName(src.storage)} (${src.quantity})`, 'warn', {
-        label: 'Взять',
+      toast(t('{0}: {1}. Под рукой закончилась, есть в {2} ({3})', paint.name, taken, storageName(src.storage), src.quantity), 'warn', {
+        label: t('Взять'),
         onClick: async () => {
           try {
             const r = await api('POST', `/paints/${paint.id}/move`,
@@ -325,8 +328,8 @@ function paintRow(p, storageId) {
     ? ((p.locations.find(l => l.storage && l.storage.id === storageId) || {}).quantity || 0)
     : p.quantity);
   const value = h('span', { class: 'qty-value' });
-  const minus = h('button', { type: 'button', 'aria-label': 'Меньше' }, '−');
-  const plus = h('button', { type: 'button', 'aria-label': 'Больше' }, '+');
+  const minus = h('button', { type: 'button', 'aria-label': t('Меньше') }, '−');
+  const plus = h('button', { type: 'button', 'aria-label': t('Больше') }, '+');
   const meta = h('div', { class: 'paint-meta' });
   const row = h('li', { class: 'paint' });
 
@@ -338,7 +341,7 @@ function paintRow(p, storageId) {
     row.classList.toggle('out', n === 0);
     const parts = [p.manufacturer, p.code].filter(Boolean);
     if (!storageId) parts.push(locationsText(p));
-    else if (p.quantity > n) parts.push(`всего ${p.quantity}`);
+    else if (p.quantity > n) parts.push(t('всего {0}', p.quantity));
     meta.textContent = parts.join(' · ');
   }
 
@@ -369,8 +372,8 @@ function paintRow(p, storageId) {
         h('div', { class: 'paint-name' }, p.name),
         meta,
         p.tags.length ? h('div', { class: 'paint-tags' },
-          p.tags.map(t => h('span', { class: 'chip-mini', style: `--tc:${t.color}` }, t.name))) : null)),
-    h('div', { class: 'qty', title: storageId ? 'Банок в этом хранилище' : 'Банок всего' }, minus, value, plus));
+          p.tags.map(tg => h('span', { class: 'chip-mini', style: `--tc:${tg.color}` }, tg.name))) : null)),
+    h('div', { class: 'qty', title: storageId ? t('Банок в этом хранилище') : t('Банок всего') }, minus, value, plus));
   return row;
 }
 
@@ -382,30 +385,30 @@ function locationsEditor(paint, storages) {
     paint = p;
     const rows = p.locations.map(loc => {
       const sid = loc.storage ? loc.storage.id : null;
-      const moveSel = h('select', { class: 'input small-select', 'aria-label': 'Переложить одну банку' },
-        h('option', { value: '' }, 'Переложить 1 в…'),
+      const moveSel = h('select', { class: 'input small-select', 'aria-label': t('Переложить одну банку') },
+        h('option', { value: '' }, t('Переложить 1 в…')),
         storages.filter(s => s.id !== sid).map(s => h('option', { value: String(s.id) }, s.name)),
-        sid !== null ? h('option', { value: 'none' }, 'без хранилища') : null);
+        sid !== null ? h('option', { value: 'none' }, t('без хранилища')) : null);
       moveSel.addEventListener('change', () => {
         if (moveSel.value) act('move', { from_storage_id: sid, to_storage_id: moveSel.value === 'none' ? null : Number(moveSel.value) });
       });
       return h('div', { class: 'loc-row' },
         h('div', { class: 'grow' },
           h('div', { class: 'loc-name' },
-            loc.storage ? loc.storage.name : 'Без хранилища',
+            loc.storage ? loc.storage.name : t('Без хранилища'),
             loc.storage && loc.storage.at_hand ? ' ✋' : '',
-            loc.storage && loc.storage.is_default ? h('span', { class: 'badge' }, 'по умолчанию') : null),
+            loc.storage && loc.storage.is_default ? h('span', { class: 'badge' }, t('по умолчанию')) : null),
           moveSel),
         h('div', { class: 'qty' },
-          h('button', { type: 'button', 'aria-label': 'Меньше', onclick: () => act('remove', { storage_id: sid }) }, '−'),
+          h('button', { type: 'button', 'aria-label': t('Меньше'), onclick: () => act('remove', { storage_id: sid }) }, '−'),
           h('span', { class: 'qty-value' }, loc.quantity),
-          h('button', { type: 'button', 'aria-label': 'Больше', onclick: () => act('add', { storage_id: sid }) }, '+')));
+          h('button', { type: 'button', 'aria-label': t('Больше'), onclick: () => act('add', { storage_id: sid }) }, '+')));
     });
-    const addSel = placementSelect(storages, null, { 'aria-label': 'Куда добавить банку' });
+    const addSel = placementSelect(storages, null, { 'aria-label': t('Куда добавить банку') });
     box.replaceChildren(
-      rows.length ? h('div', { class: 'loc-list' }, rows) : h('div', { class: 'muted small' }, 'Банок нет — краска закончилась, но осталась в каталоге'),
+      rows.length ? h('div', { class: 'loc-list' }, rows) : h('div', { class: 'muted small' }, t('Банок нет — краска закончилась, но осталась в каталоге')),
       h('div', { class: 'row loc-add' }, addSel,
-        h('button', { type: 'button', class: 'btn', onclick: () => act('add', placementBody(addSel.value)) }, '+1 банка')));
+        h('button', { type: 'button', class: 'btn', onclick: () => act('add', placementBody(addSel.value)) }, t('+1 банка'))));
   }
 
   async function act(kind, body) {
@@ -415,7 +418,7 @@ function locationsEditor(paint, storages) {
       showNotice(r.paint, r.notice);
       paintChanged(r.paint);
     } catch (err) {
-      toast(explain(err, 'Там столько банок нет'), 'err');
+      toast(explain(err, t('Там столько банок нет')), 'err');
       draw(paint);
     }
   }
@@ -436,6 +439,8 @@ const routes = [
   [/^#\/catalogs$/, (m, mount) => viewCatalogs(mount)],
   [/^#\/labels(?:\?ids=([\d,]+))?$/, (m, mount) => viewLabels(mount, m[1] ? m[1].split(',').map(Number) : null)],
   [/^#\/tags$/, () => location.replace('#/catalogs')],
+  [/^#\/settings$/, (m, mount) => viewSettings(mount)],
+  [/^#\/login$/, (m, mount) => viewLogin(mount)],
 ];
 
 let renderSeq = 0;
@@ -447,7 +452,9 @@ let cleanups = [];
 function onLeave(fn) { cleanups.push(fn); }
 
 function highlightTab(hash) {
-  const tab = hash.startsWith('#/storage') || hash.startsWith('#/labels') ? 'storages' : hash.startsWith('#/catalogs') ? 'catalogs' : 'paints';
+  const tab = hash.startsWith('#/storage') || hash.startsWith('#/labels') ? 'storages'
+    : hash.startsWith('#/catalogs') ? 'catalogs' : hash.startsWith('#/settings') ? 'settings' : 'paints';
+  document.body.classList.toggle('signed-out', hash === '#/login');
   document.querySelectorAll('.tabs a').forEach(a => a.classList.toggle('active', a.dataset.tab === tab));
 }
 
@@ -467,7 +474,7 @@ async function render() {
     try {
       await view(m, mount);
     } catch (e) {
-      mount(h('div', { class: 'empty' }, explain(e), h('br'), h('a', { class: 'btn', href: '#/' }, 'К списку красок')));
+      mount(h('div', { class: 'empty' }, explain(e), h('br'), h('a', { class: 'btn', href: '#/' }, t('К списку красок'))));
     }
     return;
   }
@@ -513,7 +520,7 @@ function anyFilter() { return anyFilterIn(filters); }
  */
 function paintBrowser({ f, storageId = null, tags, storages, makers, emptyText, emptyBig = null, onFabHref = null }) {
   // forget filters that point to deleted tags/storages/manufacturers
-  const tagIds = new Set(tags.map(t => t.id));
+  const tagIds = new Set(tags.map(tg => tg.id));
   for (const id of [...f.tags]) if (!tagIds.has(id)) f.tags.delete(id);
   if (f.storage && f.storage !== 'none' && !storages.some(s => String(s.id) === f.storage)) f.storage = '';
   if (f.maker && !makers.some(m => String(m.id) === f.maker)) f.maker = '';
@@ -524,36 +531,36 @@ function paintBrowser({ f, storageId = null, tags, storages, makers, emptyText, 
 
   const search = h('input', {
     class: 'input', type: 'search', value: f.q, enterkeyhint: 'search',
-    placeholder: storageId ? 'Поиск в этом хранилище' : 'Поиск: название, производитель, код',
+    placeholder: storageId ? t('Поиск в этом хранилище') : t('Поиск: название, производитель, код'),
     oninput: debounce(e => { f.q = e.target.value; refresh(); }, 200),
   });
 
-  const storageSel = storageId ? null : h('select', { class: 'input', 'aria-label': 'Хранилище', onchange: e => { f.storage = e.target.value; refresh(); } },
-    h('option', { value: '' }, 'Все хранилища'),
-    h('option', { value: 'none' }, 'Без хранилища'),
-    storages.map(s => h('option', { value: String(s.id) }, s.name + (s.at_hand ? ' · под рукой' : ''))));
+  const storageSel = storageId ? null : h('select', { class: 'input', 'aria-label': t('Хранилище'), onchange: e => { f.storage = e.target.value; refresh(); } },
+    h('option', { value: '' }, t('Все хранилища')),
+    h('option', { value: 'none' }, t('Без хранилища')),
+    storages.map(s => h('option', { value: String(s.id) }, s.name + (s.at_hand ? t(' · под рукой') : ''))));
   if (storageSel) storageSel.value = f.storage;
 
-  const makerSel = h('select', { class: 'input', 'aria-label': 'Производитель', onchange: e => { f.maker = e.target.value; refresh(); } },
-    h('option', { value: '' }, 'Все производители'),
+  const makerSel = h('select', { class: 'input', 'aria-label': t('Производитель'), onchange: e => { f.maker = e.target.value; refresh(); } },
+    h('option', { value: '' }, t('Все производители')),
     makers.filter(m => m.paint_count > 0 || String(m.id) === f.maker)
       .map(m => h('option', { value: String(m.id) }, storageId ? m.name : `${m.name} (${m.paint_count})`)));
   makerSel.value = f.maker;
 
-  const stockSel = h('select', { class: 'input', 'aria-label': 'Наличие', onchange: e => { f.stock = e.target.value; refresh(); } },
-    h('option', { value: '' }, 'Любое наличие'),
-    h('option', { value: 'in' }, 'Есть в наличии'),
-    h('option', { value: 'out' }, 'Закончились'));
+  const stockSel = h('select', { class: 'input', 'aria-label': t('Наличие'), onchange: e => { f.stock = e.target.value; refresh(); } },
+    h('option', { value: '' }, t('Любое наличие')),
+    h('option', { value: 'in' }, t('Есть в наличии')),
+    h('option', { value: 'out' }, t('Закончились')));
   stockSel.value = f.stock;
   // in a storage every listed paint has pots there, so "used up" makes no sense
   if (storageId) stockSel.hidden = true;
 
   const chips = h('div', { class: 'chips-scroll' },
-    storageId ? null : toggleChip('✋ Под рукой', { plain: true, pressed: f.atHand, onToggle: v => { f.atHand = v; refresh(); } }),
-    tags.map(t => toggleChip(t.name, {
-      color: t.color,
-      pressed: f.tags.has(t.id),
-      onToggle: v => { v ? f.tags.add(t.id) : f.tags.delete(t.id); refresh(); },
+    storageId ? null : toggleChip(t('✋ Под рукой'), { plain: true, pressed: f.atHand, onToggle: v => { f.atHand = v; refresh(); } }),
+    tags.map(tg => toggleChip(tg.name, {
+      color: tg.color,
+      pressed: f.tags.has(tg.id),
+      onToggle: v => { v ? f.tags.add(tg.id) : f.tags.delete(tg.id); refresh(); },
     })));
 
   const here = p => (storageId
@@ -564,7 +571,7 @@ function paintBrowser({ f, storageId = null, tags, storages, makers, emptyText, 
     const pots = current.reduce((n, p) => n + here(p), 0);
     summary.replaceChildren(h('span', null, `${countPaints(current.length)} · ${countPots(pots)}`));
     if (anyFilterIn(f, storageId)) {
-      summary.append(h('button', { type: 'button', onclick: () => { resetFiltersOf(f); render(); } }, 'Сбросить фильтры'));
+      summary.append(h('button', { type: 'button', onclick: () => { resetFiltersOf(f); render(); } }, t('Сбросить фильтры')));
     }
   }
 
@@ -594,7 +601,7 @@ function paintBrowser({ f, storageId = null, tags, storages, makers, emptyText, 
     current = paints;
     updateSummary();
     if (paints.length) listBox.replaceChildren(paintList(paints, { storageId }));
-    else if (anyFilterIn(f, storageId)) listBox.replaceChildren(h('div', { class: 'empty' }, 'Ничего не нашлось'));
+    else if (anyFilterIn(f, storageId)) listBox.replaceChildren(h('div', { class: 'empty' }, t('Ничего не нашлось')));
     else listBox.replaceChildren(emptyBig ? emptyBig() : h('div', { class: 'empty' }, emptyText));
   }
 
@@ -612,16 +619,16 @@ function paintBrowser({ f, storageId = null, tags, storages, makers, emptyText, 
 
 async function viewPaints(mount) {
   const [tags, storages, makers] = await Promise.all([api('GET', '/tags'), api('GET', '/storages'), api('GET', '/manufacturers')]);
-  const fab = h('a', { class: 'fab', href: '#/paint/new', 'aria-label': 'Добавить краску', title: 'Добавить краску' }, '+');
+  const fab = h('a', { class: 'fab', href: '#/paint/new', 'aria-label': t('Добавить краску'), title: t('Добавить краску') }, '+');
   const browser = paintBrowser({
     f: filters, tags, storages, makers,
     onFabHref: f => { fab.href = f.storage && f.storage !== 'none' ? `#/paint/new?storage=${f.storage}` : '#/paint/new'; },
     emptyBig: () => h('div', { class: 'empty-big' },
-      h('p', null, h('b', null, 'Каталог пока пуст')),
-      h('p', { class: 'muted' }, 'Добавьте первую краску. Хранилища — коробки, ящики, полки — можно завести сразу или потом.'),
+      h('p', null, h('b', null, t('Каталог пока пуст'))),
+      h('p', { class: 'muted' }, t('Добавьте первую краску. Хранилища — коробки, ящики, полки — можно завести сразу или потом.')),
       h('div', { class: 'row', style: 'justify-content:center;margin-top:14px' },
-        h('a', { class: 'btn primary', href: '#/paint/new' }, 'Добавить краску'),
-        h('a', { class: 'btn', href: '#/storages' }, 'Хранилища'))),
+        h('a', { class: 'btn primary', href: '#/paint/new' }, t('Добавить краску')),
+        h('a', { class: 'btn', href: '#/storages' }, t('Хранилища')))),
   });
   await browser.refresh();
   mount(h('div', null, browser.el, fab));
@@ -641,21 +648,21 @@ async function viewPaintForm(mount, id, prefillStorage = null) {
   const p = paint || {
     name: '', manufacturer_id: lastManufacturer(makers), code: '', hex: null, tags: [],
   };
-  const selectedTags = new Set(p.tags.map(t => t.id));
+  const selectedTags = new Set(p.tags.map(tg => tg.id));
 
   const name = h('input', { class: 'input', id: 'f-name', required: true, maxlength: 200, value: p.name, autocomplete: 'off' });
   // manufacturer: pick from the list, or add a new one right here
   const NEW = '__new';
   const maker = h('select', { class: 'input', id: 'f-maker' },
-    h('option', { value: '' }, '— выберите —'),
+    h('option', { value: '' }, t('— выберите —')),
     makers.map(m => h('option', { value: String(m.id), selected: m.id === p.manufacturer_id }, m.name)),
-    h('option', { value: NEW }, '＋ Новый производитель…'));
+    h('option', { value: NEW }, t('＋ Новый производитель…')));
   let prevMaker = maker.value;
-  const newMakerInput = h('input', { class: 'input grow', id: 'f-new-maker', maxlength: 100, placeholder: 'Название производителя', autocomplete: 'off' });
+  const newMakerInput = h('input', { class: 'input grow', id: 'f-new-maker', maxlength: 100, placeholder: t('Название производителя'), autocomplete: 'off' });
   const newMakerBox = h('div', { class: 'row', hidden: true, style: 'margin-top:8px' },
     newMakerInput,
-    h('button', { type: 'button', class: 'btn', onclick: () => addMaker() }, 'Добавить'),
-    h('button', { type: 'button', class: 'btn ghost', onclick: () => { maker.value = prevMaker; newMakerBox.hidden = true; } }, 'Отмена'));
+    h('button', { type: 'button', class: 'btn', onclick: () => addMaker() }, t('Добавить')),
+    h('button', { type: 'button', class: 'btn ghost', onclick: () => { maker.value = prevMaker; newMakerBox.hidden = true; } }, t('Отмена')));
   maker.addEventListener('change', () => {
     if (maker.value === NEW) {
       newMakerBox.hidden = false;
@@ -684,12 +691,12 @@ async function viewPaintForm(mount, id, prefillStorage = null) {
       const before = options.find(o => o.textContent.localeCompare(created.name, 'ru', { sensitivity: 'base' }) > 0);
       maker.insertBefore(h('option', { value: String(created.id) }, created.name), before || maker.querySelector(`option[value="${NEW}"]`));
       selectMaker(created.id);
-      toast(`Производитель «${created.name}» добавлен`, 'ok');
+      toast(t('Производитель «{0}» добавлен', created.name), 'ok');
     } catch (err) {
       const existing = [...maker.options].find(o => o.value !== NEW && o.textContent.toLowerCase() === value.toLowerCase());
       if (err.status === 409 && existing) {
         selectMaker(existing.value);
-        toast('Такой производитель уже есть — выбрали его', '');
+        toast(t('Такой производитель уже есть — выбрали его'), '');
       } else {
         toast(explain(err), 'err');
       }
@@ -704,7 +711,7 @@ async function viewPaintForm(mount, id, prefillStorage = null) {
     class: 'input', id: 'f-hex', value: p.hex || '', maxlength: 7, placeholder: '#rrggbb',
     autocomplete: 'off', autocapitalize: 'off', spellcheck: false,
   });
-  const picker = h('input', { type: 'color', class: 'color-picker', value: p.hex || '#808080', 'aria-label': 'Выбрать цвет' });
+  const picker = h('input', { type: 'color', class: 'color-picker', value: p.hex || '#808080', 'aria-label': t('Выбрать цвет') });
   hexText.addEventListener('input', () => {
     const n = normHex(hexText.value);
     hexText.classList.toggle('invalid', n === null);
@@ -715,20 +722,20 @@ async function viewPaintForm(mount, id, prefillStorage = null) {
     hexText.classList.remove('invalid');
     setSwatch(preview, picker.value);
   });
-  const clearColor = h('button', { type: 'button', class: 'icon-btn', title: 'Без цвета', 'aria-label': 'Без цвета', onclick: () => { hexText.value = ''; hexText.classList.remove('invalid'); setSwatch(preview, null); } }, '✕');
+  const clearColor = h('button', { type: 'button', class: 'icon-btn', title: t('Без цвета'), 'aria-label': t('Без цвета'), onclick: () => { hexText.value = ''; hexText.classList.remove('invalid'); setSwatch(preview, null); } }, '✕');
 
   const qty = h('input', { class: 'input', id: 'f-qty', type: 'number', min: 0, step: 1, inputmode: 'numeric', value: '1' });
   const step = d => { qty.value = String(Math.max(0, (parseInt(qty.value, 10) || 0) + d)); };
   const placement = placementSelect(storages, prefillStorage, { id: 'f-storage' });
 
   const tagChips = new Map();
-  const tagPicker = h('div', { class: 'tag-picker' }, tags.map(t => {
-    const chip = toggleChip(t.name, {
-      color: t.color,
-      pressed: selectedTags.has(t.id),
-      onToggle: v => { v ? selectedTags.add(t.id) : selectedTags.delete(t.id); },
+  const tagPicker = h('div', { class: 'tag-picker' }, tags.map(tg => {
+    const chip = toggleChip(tg.name, {
+      color: tg.color,
+      pressed: selectedTags.has(tg.id),
+      onToggle: v => { v ? selectedTags.add(tg.id) : selectedTags.delete(tg.id); },
     });
-    tagChips.set(t.id, chip);
+    tagChips.set(tg.id, chip);
     return chip;
   }));
   function setTag(tagId, on) {
@@ -768,8 +775,8 @@ async function viewPaintForm(mount, id, prefillStorage = null) {
 
   function collect() {
     const hex = normHex(hexText.value);
-    if (hex === null) { hexText.focus(); throw new Error('Цвет должен быть в виде #rrggbb'); }
-    if (!maker.value || maker.value === NEW) { maker.focus(); throw new Error('Выберите производителя'); }
+    if (hex === null) { hexText.focus(); throw new Error(t('Цвет должен быть в виде #rrggbb')); }
+    if (!maker.value || maker.value === NEW) { maker.focus(); throw new Error(t('Выберите производителя')); }
     const body = {
       name: name.value.trim(),
       manufacturer_id: Number(maker.value),
@@ -780,13 +787,13 @@ async function viewPaintForm(mount, id, prefillStorage = null) {
     };
     if (isNew) {
       const quantity = parseInt(qty.value, 10);
-      if (!(quantity >= 0)) { qty.focus(); throw new Error('Количество — целое число от 0'); }
+      if (!(quantity >= 0)) { qty.focus(); throw new Error(t('Количество — целое число от 0')); }
       Object.assign(body, { quantity }, placementBody(placement.value));
     }
     return body;
   }
 
-  const conflict = 'Такая краска уже есть в каталоге — найдите её и поменяйте количество';
+  const conflict = t('Такая краска уже есть в каталоге — найдите её и поменяйте количество');
   let andAnother = false;
 
   const form = h('form', { class: 'form', novalidate: false });
@@ -809,7 +816,7 @@ async function viewPaintForm(mount, id, prefillStorage = null) {
         }
         rememberManufacturer(created.manufacturer_id);
         if (created.notice) showNotice(created, created.notice);
-        else toast(`«${created.name}» добавлена (0 банок)`, 'ok');
+        else toast(t('«{0}» добавлена (0 банок)', created.name), 'ok');
         if (andAnother) {
           // keep manufacturer, storage and tags — usually the next pot is from the same batch
           name.value = ''; code.value = ''; barcode.value = ''; hexText.value = ''; setSwatch(preview, null); qty.value = '1';
@@ -820,12 +827,12 @@ async function viewPaintForm(mount, id, prefillStorage = null) {
       } else {
         await api('PATCH', `/paints/${id}`, body);
         rememberManufacturer(body.manufacturer_id);
-        toast('Сохранено', 'ok');
+        toast(t('Сохранено'), 'ok');
       }
       goBack();
     } catch (err) {
       const text = err.status === 409 && /barcode/.test(err.message)
-        ? 'Этот штрихкод уже привязан к другой краске' : explain(err, conflict);
+        ? t('Этот штрихкод уже привязан к другой краске') : explain(err, conflict);
       toast(text, 'err');
     } finally {
       buttons.forEach(b => { b.disabled = false; });
@@ -835,39 +842,39 @@ async function viewPaintForm(mount, id, prefillStorage = null) {
 
   form.append(
     photoBlock ? photoBlock.el : '', // append() would print null as text
-    h('div', { class: 'field' }, h('label', { for: 'f-name' }, 'Название'), name),
-    h('div', { class: 'field' }, h('label', { for: 'f-maker' }, 'Производитель'), maker, newMakerBox),
+    h('div', { class: 'field' }, h('label', { for: 'f-name' }, t('Название')), name),
+    h('div', { class: 'field' }, h('label', { for: 'f-maker' }, t('Производитель')), maker, newMakerBox),
     h('div', { class: 'two' },
-      h('div', { class: 'field' }, h('label', { for: 'f-code' }, 'Код / артикул'), code),
-      h('div', { class: 'field' }, h('label', { for: 'f-barcode' }, 'Штрихкод'), barcode)),
-    h('div', { class: 'field' }, h('label', { for: 'f-hex' }, 'Цвет'),
+      h('div', { class: 'field' }, h('label', { for: 'f-code' }, t('Код / артикул')), code),
+      h('div', { class: 'field' }, h('label', { for: 'f-barcode' }, t('Штрихкод')), barcode)),
+    h('div', { class: 'field' }, h('label', { for: 'f-hex' }, t('Цвет')),
       h('div', { class: 'color-row' }, preview, hexText, picker, clearColor)),
     isNew
       ? h('div', { class: 'qty-row' },
-        h('div', { class: 'field' }, h('label', { for: 'f-qty', title: '0 — закончилась, но остаётся в каталоге' }, 'Банок'),
+        h('div', { class: 'field' }, h('label', { for: 'f-qty', title: t('0 — закончилась, но остаётся в каталоге') }, t('Банок')),
           h('div', { class: 'stepper' },
-            h('button', { type: 'button', 'aria-label': 'Меньше', onclick: () => step(-1) }, '−'),
+            h('button', { type: 'button', 'aria-label': t('Меньше'), onclick: () => step(-1) }, '−'),
             qty,
-            h('button', { type: 'button', 'aria-label': 'Больше', onclick: () => step(+1) }, '+'))),
-        h('div', { class: 'field' }, h('label', { for: 'f-storage' }, 'Куда положить'), placement))
-      : h('div', { class: 'field' }, h('span', { class: 'label' }, 'Где лежит'), locationsEditor(paint, storages)),
-    h('div', { class: 'field' }, h('span', { class: 'label' }, 'Теги'),
-      tags.length ? tagPicker : h('div', { class: 'muted small' }, 'Тегов нет — их можно завести в «Справочниках»')),
+            h('button', { type: 'button', 'aria-label': t('Больше'), onclick: () => step(+1) }, '+'))),
+        h('div', { class: 'field' }, h('label', { for: 'f-storage' }, t('Куда положить')), placement))
+      : h('div', { class: 'field' }, h('span', { class: 'label' }, t('Где лежит')), locationsEditor(paint, storages)),
+    h('div', { class: 'field' }, h('span', { class: 'label' }, t('Теги')),
+      tags.length ? tagPicker : h('div', { class: 'muted small' }, t('Тегов нет — их можно завести в «Справочниках»'))),
     // stays at the bottom of the screen, also above the on-screen keyboard
     h('div', { class: 'action-bar' },
       photoBlock ? photoBlock.buttons : '',
       h('span', { class: 'spacer' }),
-      isNew ? h('button', { type: 'submit', class: 'btn', title: 'Добавить и сразу заполнить следующую', onclick: () => { andAnother = true; } }, '+ ещё') : null,
-      h('button', { type: 'submit', class: 'btn primary' }, isNew ? 'Добавить' : 'Сохранить'),
-      isNew ? null : deleteButton('Удалить', () => ({ title: `Удалить «${name.value.trim() || p.name}»?`, text: 'Краска исчезнет из каталога.' }), async () => {
+      isNew ? h('button', { type: 'submit', class: 'btn', title: t('Добавить и сразу заполнить следующую'), onclick: () => { andAnother = true; } }, t('+ ещё')) : null,
+      h('button', { type: 'submit', class: 'btn primary' }, isNew ? t('Добавить') : t('Сохранить')),
+      isNew ? null : deleteButton(t('Удалить'), () => ({ title: t('Удалить «{0}»?', name.value.trim() || p.name), text: t('Краска исчезнет из каталога.') }), async () => {
         try {
           await api('DELETE', `/paints/${id}`);
-          toast('Краска удалена', 'ok');
+          toast(t('Краска удалена'), 'ok');
           goBack();
         } catch (err) { toast(explain(err), 'err'); }
       })));
 
-  mount(h('div', null, pageHead(isNew ? 'Новая краска' : p.name, '#/'), form));
+  mount(h('div', null, pageHead(isNew ? t('Новая краска') : p.name, '#/'), form));
   window.scrollTo(0, 0);
   if (isNew && !(photo && photo.available)) name.focus({ preventScroll: true });
 }
@@ -895,9 +902,9 @@ function photoRecognizer({ status, fill }) {
   const el = h('div', { class: 'photo-block' });
   if (!status || !status.available) {
     el.append(h('div', { class: 'panel muted small' },
-      'Распознавание по фото не установлено. На компьютере с приложением выполните ',
+      t('Распознавание по фото не установлено. На компьютере с приложением выполните '),
       h('code', null, (status && status.install) || 'pip install -r requirements-photo.txt'),
-      ' и перезапустите его.'));
+      t(' и перезапустите его.')));
     return { el, buttons: '', reset() {} };
   }
 
@@ -909,13 +916,13 @@ function photoRecognizer({ status, fill }) {
   const cameraInput = h('input', { type: 'file', accept: 'image/*', capture: 'environment', hidden: true, id: 'f-camera' });
   const input = h('input', { type: 'file', accept: 'image/*', hidden: true, id: 'f-photo' });
   const button = h('button', { type: 'button', class: 'btn photo-btn' });
-  const galleryButton = h('button', { type: 'button', class: 'btn photo-btn secondary', title: 'Фото из галереи', 'aria-label': 'Фото из галереи' }, touch ? '🖼' : '🖼 Фото этикетки');
+  const galleryButton = h('button', { type: 'button', class: 'btn photo-btn secondary', title: t('Фото из галереи'), 'aria-label': t('Фото из галереи') }, touch ? '🖼' : t('🖼 Фото этикетки'));
   const panel = h('div', { class: 'panel photo-panel', hidden: true });
   let autoTags = [];
   let thumbUrl = null;
 
-  const modeSeg = touch ? h('div', { class: 'seg', role: 'group', 'aria-label': 'Режим камеры' },
-    [['photo', 'Фото'], ['stream', 'Поток + фото']].map(([value, label]) => {
+  const modeSeg = touch ? h('div', { class: 'seg', role: 'group', 'aria-label': t('Режим камеры') },
+    [['photo', t('Фото')], ['stream', t('Поток + фото')]].map(([value, label]) => {
       const b = h('button', { type: 'button', 'data-mode': value, 'aria-pressed': String(value === mode) }, label);
       b.addEventListener('click', () => {
         mode = value;
@@ -928,7 +935,7 @@ function photoRecognizer({ status, fill }) {
     })) : null;
 
   function labelButton() {
-    button.textContent = mode === 'stream' ? '🎥 Камера' : '📷 Снять';
+    button.textContent = mode === 'stream' ? t('🎥 Камера') : t('📷 Снять');
     button.hidden = !touch;
   }
   labelButton();
@@ -945,7 +952,7 @@ function photoRecognizer({ status, fill }) {
 
   function reset() {
     stopStream();
-    autoTags.forEach(t => fill.setTag(t, false));
+    autoTags.forEach(tg => fill.setTag(tg, false));
     autoTags = [];
     panel.hidden = true;
     panel.replaceChildren();
@@ -955,9 +962,9 @@ function photoRecognizer({ status, fill }) {
   // ---------- live stream ----------
   const video = h('video', { class: 'stream-video', playsinline: true, muted: true, autoplay: true });
   video.muted = true;
-  const streamStatus = h('div', { class: 'stream-status' }, 'Наведите камеру на штрихкод банки');
-  const shutter = h('button', { type: 'button', class: 'btn primary' }, '📸 Снимок этикетки');
-  const closeStream = h('button', { type: 'button', class: 'btn' }, 'Закрыть');
+  const streamStatus = h('div', { class: 'stream-status' }, t('Наведите камеру на штрихкод банки'));
+  const shutter = h('button', { type: 'button', class: 'btn primary' }, t('📸 Снимок этикетки'));
+  const closeStream = h('button', { type: 'button', class: 'btn' }, t('Закрыть'));
   const streamBox = h('div', { class: 'panel stream-box', hidden: true },
     h('div', { class: 'stream-frame' }, video, h('div', { class: 'stream-aim' })),
     streamStatus,
@@ -988,15 +995,15 @@ function photoRecognizer({ status, fill }) {
       });
     } catch (err) {
       panel.hidden = false;
-      panel.replaceChildren(h('div', null, h('b', null, 'Нет доступа к камере'),
-        h('div', { class: 'muted small' }, 'Разрешите камеру для этого сайта в настройках браузера. ', String(err.message || err))));
+      panel.replaceChildren(h('div', null, h('b', null, t('Нет доступа к камере')),
+        h('div', { class: 'muted small' }, t('Разрешите камеру для этого сайта в настройках браузера. '), String(err.message || err))));
       return;
     }
     panel.hidden = true;
     video.srcObject = stream;
     streamBox.hidden = false;
     lastCode = null;
-    streamStatus.replaceChildren('Наведите камеру на штрихкод банки');
+    streamStatus.replaceChildren(t('Наведите камеру на штрихкод банки'));
     try { await video.play(); } catch { /* autoplay is allowed for muted video */ }
     detector = await barcodeDetector();
     scanning = true;
@@ -1006,7 +1013,7 @@ function photoRecognizer({ status, fill }) {
   function stopStream() {
     scanning = false;
     clearTimeout(scanTimer);
-    if (stream) stream.getTracks().forEach(t => t.stop());
+    if (stream) stream.getTracks().forEach(tg => tg.stop());
     stream = null;
     video.srcObject = null;
     streamBox.hidden = true;
@@ -1065,17 +1072,17 @@ function photoRecognizer({ status, fill }) {
       // known paint: +1 right here, and keep scanning for the next pot
       const afterAdd = updated => {
         streamStatus.replaceChildren(
-          h('div', { class: 'muted small' }, 'Добавлено. Ещё одна такая же — жмите «+1» снова, другая банка — наведите на её штрихкод.'),
+          h('div', { class: 'muted small' }, t('Добавлено. Ещё одна такая же — жмите «+1» снова, другая банка — наведите на её штрихкод.')),
           matchRow({ paint: updated, score: 100, by: 'barcode' }, { barcode: null }, afterAdd));
       };
       streamStatus.replaceChildren(
-        h('div', { class: 'muted small' }, `Штрихкод ${code} — это:`),
+        h('div', { class: 'muted small' }, t('Штрихкод {0} — это:', code)),
         matchRow({ paint: found[0], score: 100, by: 'barcode' }, { barcode: null }, afterAdd));
     } else {
       if (!fill.barcode.trim()) fill.barcode = code;
       streamStatus.replaceChildren(
-        h('b', null, `Новый штрихкод ${code}`),
-        h('div', { class: 'muted small' }, 'Его ещё нет в каталоге. Наведите камеру на этикетку и нажмите «Снимок этикетки» — заполню остальное.'));
+        h('b', null, t('Новый штрихкод {0}', code)),
+        h('div', { class: 'muted small' }, t('Его ещё нет в каталоге. Наведите камеру на этикетку и нажмите «Снимок этикетки» — заполню остальное.')));
       shutter.classList.add('pulse');
     }
   }
@@ -1083,33 +1090,33 @@ function photoRecognizer({ status, fill }) {
   function showFlagHelp() {
     const origin = location.origin;
     const flag = 'chrome://flags/#unsafely-treat-insecure-origin-as-secure';
-    const copyBtn = text => h('button', { type: 'button', class: 'btn small-btn', onclick: async () => toast(await copyText(text) ? 'Скопировано' : 'Выделите и скопируйте вручную') }, 'Копировать');
+    const copyBtn = text => h('button', { type: 'button', class: 'btn small-btn', onclick: async () => toast(await copyText(text) ? t('Скопировано') : t('Выделите и скопируйте вручную')) }, t('Копировать'));
     panel.hidden = false;
     panel.replaceChildren(
-      h('b', null, 'Поток с камеры здесь недоступен'),
-      h('div', { class: 'muted small' }, 'Живое видео браузер разрешает только по HTTPS. На этом телефоне его можно включить флагом Chrome:'),
+      h('b', null, t('Поток с камеры здесь недоступен')),
+      h('div', { class: 'muted small' }, t('Живое видео браузер разрешает только по HTTPS. На этом телефоне его можно включить флагом Chrome:')),
       h('ol', { class: 'flag-steps' },
-        h('li', null, 'Откройте в Chrome адрес', h('div', { class: 'link-box' }, h('code', null, flag), copyBtn(flag))),
-        h('li', null, 'В поле впишите адрес приложения', h('div', { class: 'link-box' }, h('code', null, origin), copyBtn(origin))),
-        h('li', null, 'Переключите на «Enabled» и нажмите «Relaunch».')),
-      h('div', { class: 'muted small' }, 'Пока можно пользоваться режимом «Фото».'));
+        h('li', null, t('Откройте в Chrome адрес'), h('div', { class: 'link-box' }, h('code', null, flag), copyBtn(flag))),
+        h('li', null, t('В поле впишите адрес приложения'), h('div', { class: 'link-box' }, h('code', null, origin), copyBtn(origin))),
+        h('li', null, t('Переключите на «Enabled» и нажмите «Relaunch».'))),
+      h('div', { class: 'muted small' }, t('Пока можно пользоваться режимом «Фото».')));
   }
 
   async function recognize(file) {
     if (thumbUrl) URL.revokeObjectURL(thumbUrl);
     thumbUrl = URL.createObjectURL(file);
     panel.hidden = false;
-    panel.replaceChildren(head('Распознаю…', 'Обычно это пара секунд'));
+    panel.replaceChildren(head(t('Распознаю…'), t('Обычно это пара секунд')));
     button.disabled = galleryButton.disabled = true;
     try {
       const blob = await shrinkImage(file);
       const res = await fetch('/api/recognize', { method: 'POST', headers: { 'Content-Type': blob.type || 'image/jpeg' }, body: blob });
       const data = await res.json().catch(() => null);
-      if (!res.ok) throw new ApiError(res.status, (data && data.detail) || `Ошибка ${res.status}`);
+      if (!res.ok) throw new ApiError(res.status, (data && data.detail) || t('Ошибка {0}', res.status));
       show(data);
     } catch (err) {
       if (!(err instanceof ApiError)) console.error(err);
-      panel.replaceChildren(head('Не получилось распознать', err.status === 422 ? 'Файл не похож на фото' : explain(err)));
+      panel.replaceChildren(head(t('Не получилось распознать'), err.status === 422 ? t('Файл не похож на фото') : explain(err)));
     } finally {
       button.disabled = galleryButton.disabled = false;
     }
@@ -1126,31 +1133,31 @@ function photoRecognizer({ status, fill }) {
     const filled = [];
 
     // fill empty fields; never overwrite what the user typed
-    autoTags.forEach(t => fill.setTag(t, false));
+    autoTags.forEach(tg => fill.setTag(tg, false));
     autoTags = [];
-    if (s.name && !fill.name.trim()) { fill.name = s.name; filled.push('название'); }
-    if (s.manufacturer) { fill.selectMaker(s.manufacturer.id, s.manufacturer.name); filled.push('производитель'); }
-    if (s.code && !fill.code.trim()) { fill.code = s.code; filled.push('код'); }
-    if (s.barcode && !fill.barcode.trim()) { fill.barcode = s.barcode; filled.push('штрихкод'); }
-    s.tag_ids.forEach(t => fill.setTag(t, true));
+    if (s.name && !fill.name.trim()) { fill.name = s.name; filled.push(t('название')); }
+    if (s.manufacturer) { fill.selectMaker(s.manufacturer.id, s.manufacturer.name); filled.push(t('производитель')); }
+    if (s.code && !fill.code.trim()) { fill.code = s.code; filled.push(t('код')); }
+    if (s.barcode && !fill.barcode.trim()) { fill.barcode = s.barcode; filled.push(t('штрихкод')); }
+    s.tag_ids.forEach(tg => fill.setTag(tg, true));
     autoTags = [...s.tag_ids];
-    if (s.tag_ids.length) filled.push(s.tag_ids.length === 1 ? 'тег' : 'теги');
+    if (s.tag_ids.length) filled.push(s.tag_ids.length === 1 ? t('тег') : t('теги'));
 
     const lines = data.lines.filter(l => l.kind !== 'noise');
     const parts = [
-      head(filled.length ? 'Заполнено: ' + filled.join(', ') : 'Ничего уверенно не распознано',
-        `${data.seconds} с · проверьте поля ниже`),
+      head(filled.length ? t('Заполнено: ') + filled.join(', ') : t('Ничего уверенно не распознано'),
+        t('{0} с · проверьте поля ниже', data.seconds)),
     ];
 
     if (data.matches.length) {
-      parts.push(h('div', { class: 'photo-section' }, h('b', null, 'Похоже, это уже есть в каталоге'),
+      parts.push(h('div', { class: 'photo-section' }, h('b', null, t('Похоже, это уже есть в каталоге')),
         h('div', { class: 'match-list' }, data.matches.map(m => matchRow(m, s)))));
     }
 
     if (lines.length) {
       let target = 'name';
-      const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Куда вставлять' },
-        [['name', 'Название'], ['maker', 'Производитель'], ['code', 'Код']].map(([value, label]) => {
+      const seg = h('div', { class: 'seg', role: 'group', 'aria-label': t('Куда вставлять') },
+        [['name', t('Название')], ['maker', t('Производитель')], ['code', t('Код')]].map(([value, label]) => {
           const b = h('button', { type: 'button', 'aria-pressed': String(value === target) }, label);
           b.addEventListener('click', () => {
             target = value;
@@ -1190,19 +1197,19 @@ function photoRecognizer({ status, fill }) {
       }, l.text));
       markPicked();
       parts.push(h('div', { class: 'photo-section' },
-        h('b', null, 'Текст с этикетки'),
-        h('div', { class: 'muted small' }, 'В название куски добавляются по порядку, повторный тап убирает. Код и производитель — замена.'),
+        h('b', null, t('Текст с этикетки')),
+        h('div', { class: 'muted small' }, t('В название куски добавляются по порядку, повторный тап убирает. Код и производитель — замена.')),
         seg,
         h('div', { class: 'tag-picker' }, chips)));
     } else {
       parts.push(h('p', { class: 'muted small', style: 'margin:8px 0 0' },
-        'Текст не найден. Снимите этикетку ближе, ровно и при хорошем свете, без бликов.'));
+        t('Текст не найден. Снимите этикетку ближе, ровно и при хорошем свете, без бликов.')));
     }
 
     if (data.barcodes.length) {
       const b = data.barcodes[0];
-      parts.push(h('div', { class: 'muted small photo-section' }, `Штрихкод ${b.text}: `,
-        b.paint_id ? 'уже привязан к краске из каталога' : 'новый — сохранится вместе с краской'));
+      parts.push(h('div', { class: 'muted small photo-section' }, t('Штрихкод {0}: ', b.text),
+        b.paint_id ? t('уже привязан к краске из каталога') : t('новый — сохранится вместе с краской')));
     }
     panel.replaceChildren(...parts);
   }
@@ -1210,7 +1217,7 @@ function photoRecognizer({ status, fill }) {
   function matchRow(m, s, onDone = null) {
     const p = m.paint;
     const meta = [p.manufacturer, p.code, locationsText(p)].filter(Boolean).join(' · ');
-    const plus = h('button', { type: 'button', class: 'btn primary small-btn' }, '+1 банка');
+    const plus = h('button', { type: 'button', class: 'btn primary small-btn' }, t('+1 банка'));
     plus.addEventListener('click', async () => {
       plus.disabled = true;
       try {
@@ -1233,10 +1240,10 @@ function photoRecognizer({ status, fill }) {
       h('div', { class: 'grow' },
         h('div', { class: 'paint-name' }, p.name),
         h('div', { class: 'paint-meta' }, meta, ' · ', countPots(p.quantity)),
-        h('div', { class: 'muted small' }, m.by === 'barcode' ? 'совпал штрихкод' : `похоже на ${m.score}%`)),
+        h('div', { class: 'muted small' }, m.by === 'barcode' ? t('совпал штрихкод') : t('похоже на {0}%', m.score))),
       h('div', { class: 'match-actions' },
         plus,
-        h('a', { class: 'btn small-btn', href: `#/paint/${p.id}` }, 'Открыть')));
+        h('a', { class: 'btn small-btn', href: `#/paint/${p.id}` }, t('Открыть'))));
   }
 
   el.append(modeSeg || '', cameraInput, input, streamBox, panel);
@@ -1276,22 +1283,22 @@ function rememberManufacturer(id) {
 async function viewStorages(mount) {
   const storages = await api('GET', '/storages');
 
-  const nameInput = h('input', { class: 'input grow', placeholder: 'Новое хранилище: коробка, полка…', maxlength: 100, required: true });
+  const nameInput = h('input', { class: 'input grow', placeholder: t('Новое хранилище: коробка, полка…'), maxlength: 100, required: true });
   const form = h('form', { class: 'panel form' },
-    h('div', { class: 'row' }, nameInput, h('button', { type: 'submit', class: 'btn primary' }, 'Добавить')));
+    h('div', { class: 'row' }, nameInput, h('button', { type: 'submit', class: 'btn primary' }, t('Добавить'))));
   form.addEventListener('submit', async e => {
     e.preventDefault();
     try {
       await api('POST', '/storages', { name: nameInput.value.trim() });
-      toast('Хранилище добавлено', 'ok');
+      toast(t('Хранилище добавлено'), 'ok');
       render();
     } catch (err) {
-      toast(explain(err, 'Хранилище с таким названием уже есть'), 'err');
+      toast(explain(err, t('Хранилище с таким названием уже есть')), 'err');
     }
   });
 
   const find = h('input', {
-    class: 'input', type: 'search', placeholder: 'Поиск хранилища', enterkeyhint: 'search',
+    class: 'input', type: 'search', placeholder: t('Поиск хранилища'), enterkeyhint: 'search',
     oninput: () => {
       const q = find.value.trim().toLowerCase();
       list.querySelectorAll('.storage-card').forEach(c => { c.hidden = q && !c.dataset.search.includes(q); });
@@ -1303,14 +1310,14 @@ async function viewStorages(mount) {
         h('span', { class: 'storage-icon' + (s.at_hand ? ' hand' : '') }, s.at_hand ? '✋' : '📦'),
         h('div', { class: 'grow' },
           h('div', { class: 'name' }, s.name, ' ',
-            s.is_default ? h('span', { class: 'badge' }, 'по умолчанию') : s.at_hand ? h('span', { class: 'badge' }, 'под рукой') : null),
+            s.is_default ? h('span', { class: 'badge' }, t('по умолчанию')) : s.at_hand ? h('span', { class: 'badge' }, t('под рукой')) : null),
           h('div', { class: 'muted small' }, `${countPaints(s.paint_count)} · ${countPots(s.pot_count)}`,
-            s.copies_storage ? ` · дубликаты → ${s.copies_storage.name}` : '', s.nfc_tag ? ' · метка' : '')),
+            s.copies_storage ? t(' · дубликаты → {0}', s.copies_storage.name) : '', s.nfc_tag ? t(' · метка') : '')),
         h('span', { class: 'chev' }, '›'))))
-    : h('div', { class: 'empty' }, 'Хранилищ пока нет. Коробки, ящики, полки — всё, где лежат краски.');
+    : h('div', { class: 'empty' }, t('Хранилищ пока нет. Коробки, ящики, полки — всё, где лежат краски.'));
 
-  mount(h('div', null, pageHead('Хранилища', null,
-    storages.length ? h('a', { class: 'btn', href: '#/labels', style: 'margin-left:auto' }, '🖨 QR-метки') : null), form, h('h2', null, 'Все хранилища'), storages.length > 3 ? h('div', { style: 'margin-bottom:8px' }, find) : null, list));
+  mount(h('div', null, pageHead(t('Хранилища'), null,
+    storages.length ? h('a', { class: 'btn', href: '#/labels', style: 'margin-left:auto' }, t('🖨 QR-метки')) : null), form, h('h2', null, t('Все хранилища')), storages.length > 3 ? h('div', { style: 'margin-bottom:8px' }, find) : null, list));
 }
 
 async function viewStorage(mount, id) {
@@ -1323,7 +1330,7 @@ async function viewStorage(mount, id) {
   ]);
   if (!storageFilters.has(id)) storageFilters.set(id, newFilters());
   const browser = paintBrowser({
-    f: storageFilters.get(id), storageId: s.id, tags, storages, makers, emptyText: 'Здесь пока пусто',
+    f: storageFilters.get(id), storageId: s.id, tags, storages, makers, emptyText: t('Здесь пока пусто'),
   });
   await browser.refresh();
 
@@ -1334,29 +1341,29 @@ async function viewStorage(mount, id) {
   const atHand = h('input', { type: 'checkbox', checked: s.at_hand });
   const isDefault = h('input', { type: 'checkbox', checked: s.is_default, disabled: s.is_default });
   const copies = h('select', { class: 'input', id: 's-copies' },
-    h('option', { value: '' }, '— не выбрано —'),
+    h('option', { value: '' }, t('— не выбрано —')),
     storages.filter(x => x.id !== s.id).map(x => h('option', { value: String(x.id) }, x.name)));
   copies.value = s.copies_storage ? String(s.copies_storage.id) : '';
   const settings = h('form', { class: 'form' },
-    h('div', { class: 'field' }, h('label', { for: 's-name' }, 'Название'), nameInput),
-    h('div', { class: 'field' }, h('label', { for: 's-tag' }, 'Метка (необязательно)'), tagInput,
-      h('div', { class: 'hint' }, 'Любая пометка для себя: номер или ID NFC-метки, цвет наклейки…')),
-    h('label', { class: 'check' }, atHand, 'Под рукой'),
+    h('div', { class: 'field' }, h('label', { for: 's-name' }, t('Название')), nameInput),
+    h('div', { class: 'field' }, h('label', { for: 's-tag' }, t('Метка (необязательно)')), tagInput,
+      h('div', { class: 'hint' }, t('Любая пометка для себя: номер или ID NFC-метки, цвет наклейки…'))),
+    h('label', { class: 'check' }, atHand, t('Под рукой')),
     h('label', { class: 'check' }, isDefault,
-      h('span', null, 'По умолчанию ', h('span', { class: 'muted small' }, s.is_default
-        ? '— новые банки идут сюда. Чтобы снять, отметьте другое хранилище'
-        : '— новые банки будут идти сюда'))),
-    h('div', { class: 'field' }, h('label', { for: 's-copies' }, 'Куда предлагать дубликаты'), copies,
-      h('div', { class: 'hint' }, 'Если хранилище «под рукой» и сюда кладут вторую банку той же краски, приложение спросит, куда её деть, — это хранилище будет выбрано заранее.')),
+      h('span', null, t('По умолчанию '), h('span', { class: 'muted small' }, s.is_default
+        ? t('— новые банки идут сюда. Чтобы снять, отметьте другое хранилище')
+        : t('— новые банки будут идти сюда')))),
+    h('div', { class: 'field' }, h('label', { for: 's-copies' }, t('Куда предлагать дубликаты')), copies,
+      h('div', { class: 'hint' }, t('Если хранилище «под рукой» и сюда кладут вторую банку той же краски, приложение спросит, куда её деть, — это хранилище будет выбрано заранее.'))),
     h('div', { class: 'form-actions' },
-      h('button', { type: 'submit', class: 'btn primary' }, 'Сохранить'),
+      h('button', { type: 'submit', class: 'btn primary' }, t('Сохранить')),
       h('span', { class: 'spacer' }),
-      deleteButton('Удалить хранилище', { title: `Удалить «${s.name}»?`, text: 'Краски из него останутся в каталоге, просто без хранилища.' }, async () => {
+      deleteButton(t('Удалить хранилище'), { title: t('Удалить «{0}»?', s.name), text: t('Краски из него останутся в каталоге, просто без хранилища.') }, async () => {
         try {
           await api('DELETE', `/storages/${id}`);
-          toast('Хранилище удалено, краски остались в каталоге', 'ok');
+          toast(t('Хранилище удалено, краски остались в каталоге'), 'ok');
           location.hash = '#/storages';
-        } catch (err) { toast(explain(err, 'Это хранилище по умолчанию — сначала отметьте другое'), 'err'); }
+        } catch (err) { toast(explain(err, t('Это хранилище по умолчанию — сначала отметьте другое')), 'err'); }
       })));
   settings.addEventListener('submit', async e => {
     e.preventDefault();
@@ -1367,34 +1374,34 @@ async function viewStorage(mount, id) {
       };
       if (isDefault.checked && !s.is_default) body.is_default = true;
       await api('PATCH', `/storages/${id}`, body);
-      toast('Сохранено', 'ok');
+      toast(t('Сохранено'), 'ok');
       render();
     } catch (err) {
-      toast(explain(err, 'Хранилище с таким названием уже есть'), 'err');
+      toast(explain(err, t('Хранилище с таким названием уже есть')), 'err');
     }
   });
 
-  const copyBtn = h('button', { type: 'button', class: 'btn' }, 'Копировать');
-  copyBtn.addEventListener('click', async () => toast(await copyText(link) ? 'Ссылка скопирована' : 'Не получилось — выделите ссылку вручную', ''));
+  const copyBtn = h('button', { type: 'button', class: 'btn' }, t('Копировать'));
+  copyBtn.addEventListener('click', async () => toast(await copyText(link) ? t('Ссылка скопирована') : t('Не получилось — выделите ссылку вручную'), ''));
 
   mount(h('div', null,
-    pageHead(s.name, '#/storages', s.is_default ? h('span', { class: 'badge' }, 'по умолчанию')
-      : s.at_hand ? h('span', { class: 'badge' }, 'под рукой') : null),
-    s.copies_storage ? h('div', { class: 'muted small', style: 'margin:-6px 0 10px' }, `Дубликаты предлагаются в «${s.copies_storage.name}»`) : null,
+    pageHead(s.name, '#/storages', s.is_default ? h('span', { class: 'badge' }, t('по умолчанию'))
+      : s.at_hand ? h('span', { class: 'badge' }, t('под рукой')) : null),
+    s.copies_storage ? h('div', { class: 'muted small', style: 'margin:-6px 0 10px' }, t('Дубликаты предлагаются в «{0}»', s.copies_storage.name)) : null,
     browser.el,
     h('div', { class: 'row', style: 'margin-top:12px' },
-      h('a', { class: 'btn primary', href: `#/paint/new?storage=${s.id}` }, '+ Добавить краску сюда')),
-    h('h2', null, 'Метка'),
+      h('a', { class: 'btn primary', href: `#/paint/new?storage=${s.id}` }, t('+ Добавить краску сюда'))),
+    h('h2', null, t('Метка')),
     h('div', { class: 'panel qr-panel' },
       qrImg(link),
       h('div', { class: 'grow' },
         h('div', { class: 'link-box' }, h('code', null, link), copyBtn),
         h('p', { class: 'muted small', style: 'margin:10px 0' },
-          'Наведите камеру телефона на QR-код — откроется это хранилище (телефон должен быть в той же сети). ',
-          'Ссылку можно записать и в NFC-метку (например, приложением NFC Tools: «Записать» → «URL»).'),
-        h('a', { class: 'btn', href: `#/labels?ids=${s.id}` }, '🖨 Напечатать метку'))),
-    h('h2', null, 'Настройки'),
-    h('details', { class: 'panel' }, h('summary', null, 'Название, метка, по умолчанию, дубликаты, удаление'), settings)));
+          t('Наведите камеру телефона на QR-код — откроется это хранилище (телефон должен быть в той же сети). '),
+          t('Ссылку можно записать и в NFC-метку (например, приложением NFC Tools: «Записать» → «URL»).')),
+        h('a', { class: 'btn', href: `#/labels?ids=${s.id}` }, t('🖨 Напечатать метку')))),
+    h('h2', null, t('Настройки')),
+    h('details', { class: 'panel' }, h('summary', null, t('Название, метка, по умолчанию, дубликаты, удаление')), settings)));
 }
 
 // ======================= QR labels =======================
@@ -1407,13 +1414,13 @@ function storageLink(info, id) {
 }
 
 function qrImg(link, cls = 'qr') {
-  const img = h('img', { class: cls, alt: 'QR-код', src: `/api/qr.svg?data=${encodeURIComponent(link)}` });
+  const img = h('img', { class: cls, alt: t('QR-код'), src: `/api/qr.svg?data=${encodeURIComponent(link)}` });
   img.addEventListener('error', () => img.replaceWith(h('div', { class: cls + ' qr-missing muted small' },
-    'QR не получился — обновите зависимости: pip install -r requirements.txt')));
+    t('QR не получился — обновите зависимости: pip install -r requirements.txt'))));
   return img;
 }
 
-const LABEL_SIZES = [['s', '3 см'], ['m', '4 см'], ['l', '5,5 см']];
+const LABEL_SIZES = [['s', t('3 см')], ['m', t('4 см')], ['l', t('5,5 см')]];
 const getLabelSize = () => { try { return localStorage.getItem('pa.labelSize') || 'm'; } catch { return 'm'; } };
 
 async function viewLabels(mount, preselected) {
@@ -1429,8 +1436,8 @@ async function viewLabels(mount, preselected) {
       ? picked.map(s => h('div', { class: 'qr-label' },
         qrImg(storageLink(info, s.id), 'qr-label-code'),
         h('div', { class: 'qr-label-name' }, s.name)))
-      : [h('div', { class: 'empty no-print' }, 'Отметьте хранилища, для которых нужны метки')]));
-    count.textContent = picked.length ? `Меток: ${picked.length}` : '';
+      : [h('div', { class: 'empty no-print' }, t('Отметьте хранилища, для которых нужны метки'))]));
+    count.textContent = picked.length ? t('Меток: {0}', picked.length) : '';
   };
 
   const count = h('span', { class: 'muted small' });
@@ -1439,8 +1446,8 @@ async function viewLabels(mount, preselected) {
     box.addEventListener('change', () => { box.checked ? chosen.add(s.id) : chosen.delete(s.id); drawSheet(); });
     return h('label', { class: 'check' }, box, s.name);
   });
-  const all = h('button', { type: 'button', class: 'btn small' }, 'Все');
-  const none = h('button', { type: 'button', class: 'btn small' }, 'Ни одного');
+  const all = h('button', { type: 'button', class: 'btn small' }, t('Все'));
+  const none = h('button', { type: 'button', class: 'btn small' }, t('Ни одного'));
   const setAll = on => {
     storages.forEach(s => (on ? chosen.add(s.id) : chosen.delete(s.id)));
     checks.forEach(l => { l.querySelector('input').checked = on; });
@@ -1460,9 +1467,9 @@ async function viewLabels(mount, preselected) {
     return b;
   }));
 
-  const printBtn = h('button', { type: 'button', class: 'btn primary' }, '🖨 Печать');
+  const printBtn = h('button', { type: 'button', class: 'btn primary' }, t('🖨 Печать'));
   printBtn.addEventListener('click', () => {
-    if (!chosen.size) { toast('Не выбрано ни одного хранилища', 'err'); return; }
+    if (!chosen.size) { toast(t('Не выбрано ни одного хранилища'), 'err'); return; }
     window.print();
   });
 
@@ -1470,19 +1477,154 @@ async function viewLabels(mount, preselected) {
   drawSheet();
   mount(h('div', null,
     h('div', { class: 'no-print' },
-      pageHead('QR-метки', '#/storages'),
+      pageHead(t('QR-метки'), '#/storages'),
       h('div', { class: 'panel' },
-        h('div', { class: 'field' }, h('label', null, 'Ширина метки'), seg),
+        h('div', { class: 'field' }, h('label', null, t('Ширина метки')), seg),
         h('div', { class: 'field' },
-          h('label', null, 'Хранилища ', h('span', { class: 'label-picks' }, all, none)),
+          h('label', null, t('Хранилища '), h('span', { class: 'label-picks' }, all, none)),
           h('div', { class: 'label-checks' }, checks)),
         h('div', { class: 'row', style: 'align-items:center' }, printBtn, count)),
       h('p', { class: 'muted small' },
-        'Метки ведут на адрес ', h('code', null, base), '. Если у компьютера сменится IP, напечатанные метки перестанут открываться — ',
-        'закрепите за ним адрес в настройках роутера (резервирование DHCP). ',
-        'Печатайте в масштабе 100% («Фактический размер»), режьте по пунктиру, сверху можно заклеить скотчем.'),
-      h('h2', null, 'Предпросмотр')),
+        t('Метки ведут на адрес '), h('code', null, base), t('. Если у компьютера сменится IP, напечатанные метки перестанут открываться — '),
+        t('закрепите за ним адрес в настройках роутера (резервирование DHCP). '),
+        t('Печатайте в масштабе 100% («Фактический размер»), режьте по пунктиру, сверху можно заклеить скотчем.')),
+      h('h2', null, t('Предпросмотр'))),
     sheet));
+}
+
+// ======================= sign-in and settings =======================
+
+/** Sign-in is on and this device isn't signed in: show the login screen, then come back here. */
+function goToLogin() {
+  if (location.hash === '#/login') return;
+  try { sessionStorage.setItem('pa.next', location.hash || '#/'); } catch { /* private mode */ }
+  location.hash = '#/login';
+}
+
+async function viewLogin(mount) {
+  const state = await api('GET', '/auth');
+  const next = () => {
+    let to = '#/';
+    try { to = sessionStorage.getItem('pa.next') || '#/'; sessionStorage.removeItem('pa.next'); } catch { /* */ }
+    location.replace(to === '#/login' ? '#/' : to);
+  };
+  if (state.signed_in) { next(); return; }
+  const password = h('input', { class: 'input', id: 'l-password', type: 'password', autocomplete: 'current-password', required: true });
+  const error = h('div', { class: 'login-error', role: 'alert' });
+  const form = h('form', { class: 'panel login' },
+    h('h1', null, 'Paint Accountant'),
+    h('div', { class: 'field' }, h('label', null, t('Пользователь')), h('input', { class: 'input', value: state.user, readonly: true, autocomplete: 'username' })),
+    h('div', { class: 'field' }, h('label', { for: 'l-password' }, t('Пароль')), password),
+    error,
+    h('button', { type: 'submit', class: 'btn primary' }, t('Войти')));
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    error.textContent = '';
+    try {
+      await api('POST', '/auth/login', { password: password.value });
+      next();
+    } catch (err) {
+      const d = err.detail || {};
+      error.textContent = d.code === 'wrong_password' ? t('Неверный пароль')
+        : d.code === 'too_many_attempts' ? t('Слишком много попыток — подождите {0} с', d.wait) : explain(err);
+      password.select();
+    }
+  });
+  mount(h('div', { class: 'login-wrap' }, form,
+    h('p', { class: 'muted small' }, t('Забыли пароль? На компьютере с приложением выполните '),
+      h('code', null, 'python run.py --reset-auth'), t(' — вход отключится, новый пароль можно задать в настройках.'))));
+  password.focus();
+}
+
+function passwordPair(onSubmit, buttonLabel) {
+  const first = h('input', { class: 'input', type: 'password', id: 'p-new', autocomplete: 'new-password', minlength: 4, required: true });
+  const again = h('input', { class: 'input', type: 'password', id: 'p-again', autocomplete: 'new-password', minlength: 4, required: true });
+  const form = h('form', { class: 'form' },
+    h('div', { class: 'field' }, h('label', { for: 'p-new' }, t('Новый пароль')), first,
+      h('div', { class: 'hint' }, t('Не короче 4 символов'))),
+    h('div', { class: 'field' }, h('label', { for: 'p-again' }, t('Ещё раз')), again),
+    h('div', { class: 'form-actions' }, h('button', { type: 'submit', class: 'btn primary' }, buttonLabel)));
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    if (first.value !== again.value) { toast(t('Пароли не совпадают'), 'err'); again.focus(); return; }
+    if (first.value.length < 4) { toast(t('Пароль короче 4 символов'), 'err'); first.focus(); return; }
+    try { await onSubmit(first.value); } catch (err) { toast(explain(err), 'err'); }
+  });
+  return form;
+}
+
+function segButtons(label, options, current, onPick) {
+  return h('div', { class: 'seg', role: 'group', 'aria-label': label }, options.map(([value, text]) => {
+    const b = h('button', { type: 'button', 'aria-pressed': String(value === current) }, text);
+    b.addEventListener('click', () => onPick(value));
+    return b;
+  }));
+}
+
+async function viewSettings(mount) {
+  const [state, info] = await Promise.all([api('GET', '/auth'), api('GET', '/info').catch(() => ({}))]);
+  const touch = window.matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
+
+  const device = h('div', { class: 'panel form' },
+    h('div', { class: 'field' }, h('span', { class: 'label' }, t('Язык')),
+      segButtons(t('Язык'), LANGS, LANG, code => { if (code !== LANG) setLang(code); })),
+    touch ? h('div', { class: 'field' }, h('span', { class: 'label' }, t('Камера при добавлении краски')),
+      segButtons(t('Режим камеры'), [['photo', t('Фото')], ['stream', t('Поток + фото')]], cameraMode(), value => {
+        cameraMode(value);
+        render();
+      }),
+      h('div', { class: 'hint' }, t('«Фото» открывает приложение камеры. «Поток» ловит штрихкоды в живом видео, но без HTTPS требует флаг Chrome.'))) : null);
+
+  let signIn;
+  if (!state.enabled) {
+    signIn = h('div', { class: 'panel' },
+      h('p', { style: 'margin-top:0' }, t('Сейчас вход выключен: приложение открывается без пароля у всех в вашей сети.')),
+      h('p', { class: 'muted small' }, t('Включите вход, чтобы спрашивать пароль. Пользователь — {0}. Этот телефон или компьютер останется в системе, на остальных устройствах нужно будет войти один раз.', state.user)),
+      passwordPair(async pw => {
+        await api('POST', '/auth/password', { password: pw });
+        toast(t('Вход по паролю включён'), 'ok');
+        render();
+      }, t('Включить вход')));
+  } else {
+    const logout = h('button', { type: 'button', class: 'btn' }, t('Выйти'));
+    logout.addEventListener('click', async () => {
+      await api('POST', '/auth/logout').catch(() => null);
+      location.hash = '#/login';
+    });
+    const off = h('button', { type: 'button', class: 'btn danger' }, t('Отключить вход'));
+    off.addEventListener('click', async () => {
+      const ok = await confirmDialog({
+        title: t('Отключить вход по паролю?'),
+        text: t('Приложение снова будет открываться без пароля у всех в вашей сети.'),
+        confirmLabel: t('Отключить'),
+      });
+      if (!ok) return;
+      try {
+        await api('POST', '/auth/disable');
+        toast(t('Вход отключён'), 'ok');
+        render();
+      } catch (err) { toast(explain(err), 'err'); }
+    });
+    signIn = h('div', { class: 'panel' },
+      h('p', { style: 'margin-top:0' }, t('Вход включён. Пользователь — {0}.', state.user)),
+      h('div', { class: 'row' }, logout, off),
+      h('details', { class: 'sub-details' }, h('summary', null, t('Сменить пароль')),
+        h('p', { class: 'muted small' }, t('После смены на остальных устройствах нужно будет войти заново.')),
+        passwordPair(async pw => {
+          await api('POST', '/auth/password', { password: pw });
+          toast(t('Пароль изменён'), 'ok');
+          render();
+        }, t('Сменить пароль'))));
+  }
+
+  mount(h('div', null,
+    pageHead(t('Настройки')),
+    h('h2', null, t('На этом устройстве')), device,
+    h('h2', null, t('Вход по паролю')), signIn,
+    h('p', { class: 'muted small' },
+      t('Пароль передаётся по сети без шифрования (http), поэтому не используйте пароль от важных аккаунтов. '),
+      t('Забыли пароль? На компьютере с приложением выполните '), h('code', null, 'python run.py --reset-auth'), '.'),
+    info.version ? h('p', { class: 'muted small' }, `Paint Accountant ${info.version}`) : null));
 }
 
 // ======================= catalogs: manufacturers and tags =======================
@@ -1493,8 +1635,8 @@ async function viewCatalogs(mount) {
   const [makers, tags] = await Promise.all([api('GET', '/manufacturers'), api('GET', '/tags')]);
   const body = h('div', { class: 'card-list' });
   const draw = () => body.replaceChildren(...(catalogSection === 'makers' ? manufacturersSection(makers) : tagsSection(tags)));
-  const seg = h('div', { class: 'seg catalog-seg', role: 'group', 'aria-label': 'Раздел' },
-    [['makers', `Производители (${makers.length})`], ['tags', `Теги (${tags.length})`]].map(([value, label]) => {
+  const seg = h('div', { class: 'seg catalog-seg', role: 'group', 'aria-label': t('Раздел') },
+    [['makers', t('Производители ({0})', makers.length)], ['tags', t('Теги ({0})', tags.length)]].map(([value, label]) => {
       const b = h('button', { type: 'button', 'data-section': value, 'aria-pressed': String(value === catalogSection) }, label);
       b.addEventListener('click', () => {
         catalogSection = value;
@@ -1504,7 +1646,7 @@ async function viewCatalogs(mount) {
       return b;
     }));
   draw();
-  mount(h('div', null, pageHead('Справочники'), seg, body));
+  mount(h('div', null, pageHead(t('Справочники')), seg, body));
 }
 
 /** Name shown as text; ✎ turns it into a field with ✓ / ✕ (Enter saves, Esc cancels). */
@@ -1518,9 +1660,9 @@ function editableName(item, { save, label, maxlength }) {
       if (!ok || !v || v === item.name) { show(); return; }
       try {
         Object.assign(item, await save(v));
-        toast('Сохранено', 'ok');
+        toast(t('Сохранено'), 'ok');
       } catch (err) {
-        toast(explain(err, 'Такое название уже есть'), 'err');
+        toast(explain(err, t('Такое название уже есть')), 'err');
       }
       show();
     };
@@ -1529,8 +1671,8 @@ function editableName(item, { save, label, maxlength }) {
       if (e.key === 'Escape') { e.preventDefault(); done(false); }
     });
     box.replaceChildren(input,
-      h('button', { type: 'button', class: 'icon-btn ok', title: 'Сохранить', 'aria-label': 'Сохранить', onclick: () => done(true) }, '✓'),
-      h('button', { type: 'button', class: 'icon-btn', title: 'Отмена', 'aria-label': 'Отмена', onclick: () => done(false) }, '✕'));
+      h('button', { type: 'button', class: 'icon-btn ok', title: t('Сохранить'), 'aria-label': t('Сохранить'), onclick: () => done(true) }, '✓'),
+      h('button', { type: 'button', class: 'icon-btn', title: t('Отмена'), 'aria-label': t('Отмена'), onclick: () => done(false) }, '✕'));
     input.focus();
     input.select();
   };
@@ -1540,7 +1682,7 @@ function editableName(item, { save, label, maxlength }) {
 
 /** Icon button that asks for confirmation before deleting. */
 function deleteIcon(question, onConfirm) {
-  const b = h('button', { type: 'button', class: 'icon-btn danger-icon', title: 'Удалить', 'aria-label': 'Удалить' }, '🗑');
+  const b = h('button', { type: 'button', class: 'icon-btn danger-icon', title: t('Удалить'), 'aria-label': t('Удалить') }, '🗑');
   b.addEventListener('click', async e => {
     e.preventDefault();
     if (await confirmDialog(question)) onConfirm();
@@ -1558,7 +1700,7 @@ function showPaintsOf(kind, id) {
 
 function addRow(placeholder, onAdd, extra = null) {
   const input = h('input', { class: 'input grow', placeholder, maxlength: 100, required: true });
-  const form = h('form', { class: 'cat-add' }, extra, input, h('button', { type: 'submit', class: 'btn primary' }, 'Добавить'));
+  const form = h('form', { class: 'cat-add' }, extra, input, h('button', { type: 'submit', class: 'btn primary' }, t('Добавить')));
   form.addEventListener('submit', async e => {
     e.preventDefault();
     if (await onAdd(input.value.trim())) render();
@@ -1568,10 +1710,10 @@ function addRow(placeholder, onAdd, extra = null) {
 
 function catRow({ lead, name, sub, count, onOpen, actions }) {
   // the whole middle of the row opens the paint list; the name gets the full width
-  const info = h('div', { class: 'grow cat-info', role: 'link', tabindex: 0, title: 'Показать краски' },
+  const info = h('div', { class: 'grow cat-info', role: 'link', tabindex: 0, title: t('Показать краски') },
     name.el,
     h('div', { class: 'keywords' },
-      h('span', { class: count ? 'cat-count' : '' }, count ? countPaints(count) : 'нет красок'),
+      h('span', { class: count ? 'cat-count' : '' }, count ? countPaints(count) : t('нет красок')),
       sub ? ` · ${sub}` : ''));
   const open = e => {
     if (e.target.closest('input, button')) return; // renaming in progress
@@ -1583,19 +1725,19 @@ function catRow({ lead, name, sub, count, onOpen, actions }) {
 }
 
 function manufacturersSection(makers) {
-  const add = addRow('Новый производитель', async name => {
+  const add = addRow(t('Новый производитель'), async name => {
     try {
       await api('POST', '/manufacturers', { name });
-      toast('Производитель добавлен', 'ok');
+      toast(t('Производитель добавлен'), 'ok');
       return true;
     } catch (err) {
-      toast(explain(err, 'Такой производитель уже есть'), 'err');
+      toast(explain(err, t('Такой производитель уже есть')), 'err');
       return false;
     }
   });
   const rows = makers.map(m => {
     const name = editableName(m, {
-      label: 'Название производителя', maxlength: 100,
+      label: t('Название производителя'), maxlength: 100,
       save: v => api('PATCH', `/manufacturers/${m.id}`, { name: v }),
     });
     return catRow({
@@ -1603,13 +1745,13 @@ function manufacturersSection(makers) {
       count: m.paint_count,
       onOpen: () => showPaintsOf('maker', m.id),
       actions: h('div', { class: 'cat-actions' },
-        h('button', { type: 'button', class: 'icon-btn', title: 'Переименовать', 'aria-label': 'Переименовать', onclick: name.edit }, '✎'),
-        m.paint_count ? null : deleteIcon({ title: `Удалить производителя «${m.name}»?` }, async () => {
+        h('button', { type: 'button', class: 'icon-btn', title: t('Переименовать'), 'aria-label': t('Переименовать'), onclick: name.edit }, '✎'),
+        m.paint_count ? null : deleteIcon({ title: t('Удалить производителя «{0}»?', m.name) }, async () => {
           try {
             await api('DELETE', `/manufacturers/${m.id}`);
-            toast('Производитель удалён', 'ok');
+            toast(t('Производитель удалён'), 'ok');
             render();
-          } catch (err) { toast(explain(err, 'Нельзя удалить: у производителя есть краски'), 'err'); }
+          } catch (err) { toast(explain(err, t('Нельзя удалить: у производителя есть краски')), 'err'); }
         })),
     });
   });
@@ -1617,44 +1759,44 @@ function manufacturersSection(makers) {
 }
 
 function tagsSection(tags) {
-  const newColor = h('input', { type: 'color', class: 'color-dot', value: '#888888', 'aria-label': 'Цвет тега', title: 'Цвет' });
-  const add = addRow('Новый тег', async name => {
+  const newColor = h('input', { type: 'color', class: 'color-dot', value: '#888888', 'aria-label': t('Цвет тега'), title: t('Цвет') });
+  const add = addRow(t('Новый тег'), async name => {
     try {
       await api('POST', '/tags', { name, color: newColor.value });
-      toast('Тег добавлен', 'ok');
+      toast(t('Тег добавлен'), 'ok');
       return true;
     } catch (err) {
-      toast(explain(err, 'Тег с таким названием уже есть'), 'err');
+      toast(explain(err, t('Тег с таким названием уже есть')), 'err');
       return false;
     }
   }, newColor);
-  const rows = tags.map(t => {
-    const color = h('input', { type: 'color', class: 'color-dot', value: t.color, 'aria-label': `Цвет тега ${t.name}`, title: 'Сменить цвет' });
+  const rows = tags.map(tg => {
+    const color = h('input', { type: 'color', class: 'color-dot', value: tg.color, 'aria-label': t('Цвет тега {0}', tg.name), title: t('Сменить цвет') });
     color.addEventListener('change', async () => {
       try {
-        Object.assign(t, await api('PATCH', `/tags/${t.id}`, { color: color.value }));
-        toast('Цвет сохранён', 'ok');
+        Object.assign(tg, await api('PATCH', `/tags/${tg.id}`, { color: color.value }));
+        toast(t('Цвет сохранён'), 'ok');
       } catch (err) {
-        color.value = t.color;
+        color.value = tg.color;
         toast(explain(err), 'err');
       }
     });
-    const name = editableName(t, {
-      label: 'Название тега', maxlength: 50,
-      save: v => api('PATCH', `/tags/${t.id}`, { name: v }),
+    const name = editableName(tg, {
+      label: t('Название тега'), maxlength: 50,
+      save: v => api('PATCH', `/tags/${tg.id}`, { name: v }),
     });
     return catRow({
       lead: color,
       name,
-      sub: t.keywords.length ? 'на этикетке: ' + t.keywords.join(', ') : null,
-      count: t.paint_count,
-      onOpen: () => showPaintsOf('tag', t.id),
+      sub: tg.keywords.length ? t('на этикетке: ') + tg.keywords.join(', ') : null,
+      count: tg.paint_count,
+      onOpen: () => showPaintsOf('tag', tg.id),
       actions: h('div', { class: 'cat-actions' },
-        h('button', { type: 'button', class: 'icon-btn', title: 'Переименовать', 'aria-label': 'Переименовать', onclick: name.edit }, '✎'),
-        deleteIcon({ title: `Удалить тег «${t.name}»?`, text: t.paint_count ? `Он снимется с ${countPaints(t.paint_count)}.` : '' }, async () => {
+        h('button', { type: 'button', class: 'icon-btn', title: t('Переименовать'), 'aria-label': t('Переименовать'), onclick: name.edit }, '✎'),
+        deleteIcon({ title: t('Удалить тег «{0}»?', tg.name), text: tg.paint_count ? t('Он снимется с {0}.', countPaints(tg.paint_count)) : '' }, async () => {
           try {
-            await api('DELETE', `/tags/${t.id}`);
-            toast('Тег удалён', 'ok');
+            await api('DELETE', `/tags/${tg.id}`);
+            toast(t('Тег удалён'), 'ok');
             render();
           } catch (err) { toast(explain(err), 'err'); }
         })),

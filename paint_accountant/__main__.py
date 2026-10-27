@@ -6,7 +6,8 @@ import argparse
 
 import uvicorn
 
-from . import recognition
+from . import auth, recognition
+from .db import connect
 from .app import create_app
 from .netinfo import lan_ip
 from .config import (
@@ -42,6 +43,8 @@ def main(argv: list[str] | None = None) -> None:
         help=f"folder for the database and photos (default ./{DEFAULT_DATA_DIR} in the app folder, env PAINT_DATA_DIR)",
     )
     parser.add_argument("--config", help=f"settings file to use instead of {CONFIG_FILE.name}")
+    parser.add_argument("--reset-auth", action="store_true",
+                        help="forgot the password? turn sign-in off (set a new one in Settings) and exit")
     args = parser.parse_args(argv)
 
     if args.config is None and ensure_config_file():
@@ -51,6 +54,14 @@ def main(argv: list[str] | None = None) -> None:
         host=args.host, port=args.port, data_dir=args.data_dir, config_file=args.config
     )
     app = create_app(settings)
+    if args.reset_auth:
+        conn = connect(settings.db_path)
+        try:
+            auth.disable(conn)
+        finally:
+            conn.close()
+        print("Sign-in is off: the app opens without a password. Set a new one in Settings.")
+        return
     print(f"Paint Accountant: data in {settings.data_dir}")
     print("Open in a browser:")
     for url in _urls(settings.host, settings.port):
