@@ -189,6 +189,12 @@ MIGRATIONS: list[str] = [
         FROM (VALUES ('texture'), ('textures')) v
         JOIN tag t ON py_lower(t.name) = 'спецэффект';
     """,
+    # 9 — Scale75 joins the starter manufacturers (unless it's already there, spelled with a space or not)
+    """
+    INSERT INTO manufacturer (name)
+        SELECT 'Scale75'
+        WHERE NOT EXISTS (SELECT 1 FROM manufacturer WHERE replace(py_lower(name), ' ', '') = 'scale75');
+    """,
 ]
 
 # Starter tags: (name, plaque color, label keywords)

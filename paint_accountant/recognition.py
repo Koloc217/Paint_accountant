@@ -193,6 +193,8 @@ ALIASES = {
     "the army painter": "Army Painter",
     "army painter": "Army Painter",
     "acrylicos vallejo": "Vallejo",
+    "scale 75": "Scale75",
+    "scalecolor": "Scale75",
 }
 
 # product codes: (manufacturer it usually belongs to, pattern, formatter)

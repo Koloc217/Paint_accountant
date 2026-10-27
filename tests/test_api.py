@@ -144,7 +144,7 @@ def test_reopen_keeps_data(tmp_path):
 
 def test_starter_manufacturers(client):
     names = [m["name"] for m in client.get("/api/manufacturers").json()]
-    assert names == ["AK", "Citadel", "Green Stuff World", "Kaleido", "Kimera", "Tamiya", "Vallejo"]
+    assert names == ["AK", "Citadel", "Green Stuff World", "Kaleido", "Kimera", "Scale75", "Tamiya", "Vallejo"]
 
 
 def test_paint_by_manufacturer_id_or_name(client):
@@ -157,8 +157,8 @@ def test_paint_by_manufacturer_id_or_name(client):
     assert p2["manufacturer_id"] == vallejo["id"]
 
     # a new name is added to the list
-    p3 = _paint(client, manufacturer="Scale75", name="Black Rock")
-    assert "Scale75" in [m["name"] for m in client.get("/api/manufacturers").json()]
+    p3 = _paint(client, manufacturer="Pro Acryl", name="Black Rock")
+    assert "Pro Acryl" in [m["name"] for m in client.get("/api/manufacturers").json()]
 
     # moving a paint to another manufacturer
     ak = next(m for m in client.get("/api/manufacturers").json() if m["name"] == "AK")

@@ -272,3 +272,8 @@ def test_thinner_label_suggests_technical_tag(client, conn):
 def test_label_words_suggest_tags(client, conn, label, tag):
     r = suggest(conn, _reading((label, 50)))
     assert _tag_id(client, tag) in r["suggestion"]["tag_ids"]
+
+
+def test_scale75_on_label(conn):
+    r = suggest(conn, _reading(("SCALE 75", 20), ("Ink Black", 50)))
+    assert r["suggestion"]["manufacturer"]["name"] == "Scale75"

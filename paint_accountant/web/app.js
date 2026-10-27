@@ -1275,15 +1275,13 @@ function rememberManufacturer(id) {
 async function viewStorages(mount) {
   const storages = await api('GET', '/storages');
 
-  const nameInput = h('input', { class: 'input grow', placeholder: 'Например: Коробка 1, Ящик у стола', maxlength: 100, required: true });
-  const atHand = h('input', { type: 'checkbox' });
+  const nameInput = h('input', { class: 'input grow', placeholder: 'Новое хранилище: коробка, полка…', maxlength: 100, required: true });
   const form = h('form', { class: 'panel form' },
-    h('div', { class: 'row' }, nameInput, h('button', { type: 'submit', class: 'btn primary' }, 'Добавить')),
-    h('label', { class: 'check' }, atHand, h('span', null, 'Под рукой ', h('span', { class: 'muted small' }, '— ящик или органайзер в прямом доступе'))));
+    h('div', { class: 'row' }, nameInput, h('button', { type: 'submit', class: 'btn primary' }, 'Добавить')));
   form.addEventListener('submit', async e => {
     e.preventDefault();
     try {
-      await api('POST', '/storages', { name: nameInput.value.trim(), at_hand: atHand.checked });
+      await api('POST', '/storages', { name: nameInput.value.trim() });
       toast('Хранилище добавлено', 'ok');
       render();
     } catch (err) {

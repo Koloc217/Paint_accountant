@@ -59,7 +59,7 @@
 | id | скрытое | |
 | название | да | уникальное без учёта регистра |
 
-Стартовый список: AK, Citadel, Green Stuff World, Kaleido, Kimera, Tamiya, Vallejo. Производителя, у которого есть краски, удалить нельзя.
+Стартовый список: AK, Citadel, Green Stuff World, Kaleido, Kimera, Scale75, Tamiya, Vallejo. Производителя, у которого есть краски, удалить нельзя.
 
 ### Хранилище (storage)
 | поле | обязательное | примечание |
