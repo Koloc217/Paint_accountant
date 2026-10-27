@@ -40,5 +40,6 @@ def test_no_untranslated_russian_left_in_code():
     src = re.sub(r"/\*.*?\*/|//[^\n]*", "", src, flags=re.S)
     src = re.sub(r"\bt\('(?:[^'\\]|\\.)*'", "", src)
     src = src.replace("plural(n, 'краска', 'краски', 'красок')", "").replace("plural(n, 'банка', 'банки', 'банок')", "")
-    left = [ln.strip() for ln in src.splitlines() if re.search(r"[А-Яа-яЁё]", ln)]
+    left = [ln.strip() for ln in src.splitlines()
+            if re.search(r"[А-Яа-яЁё]", ln) and not ln.startswith("const TRANSLIT")]  # file-name transliteration
     assert not left, left
