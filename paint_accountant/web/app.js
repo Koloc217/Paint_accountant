@@ -489,75 +489,97 @@ function goBack(fallback = '#/') {
 
 // ======================= paints list =======================
 
-const filters = { q: '', storage: '', maker: '', tags: new Set(), atHand: false, stock: '' };
+const newFilters = () => ({ q: '', storage: '', maker: '', tags: new Set(), atHand: false, stock: '' });
+const filters = newFilters();          // the main paint list
+const storageFilters = new Map();      // one set per storage page, kept while you move around
 
-function resetListFilters() {
-  Object.assign(filters, { q: '', storage: '', maker: '', atHand: false, stock: '' });
-  filters.tags.clear();
+function resetFiltersOf(f) {
+  Object.assign(f, newFilters(), { tags: f.tags });
+  f.tags.clear();
 }
 
-function anyFilter() {
-  return Boolean(filters.q.trim() || filters.storage || filters.maker || filters.tags.size || filters.atHand || filters.stock);
+function resetListFilters() { resetFiltersOf(filters); }
+
+function anyFilterIn(f, storageId = null) {
+  return Boolean(f.q.trim() || (!storageId && f.storage) || f.maker || f.tags.size || f.atHand || f.stock);
 }
 
-async function viewPaints(mount) {
-  const [tags, storages, makers] = await Promise.all([api('GET', '/tags'), api('GET', '/storages'), api('GET', '/manufacturers')]);
+function anyFilter() { return anyFilterIn(filters); }
 
-  // forget filters that point to deleted tags/storages
+/**
+ * Search, filters, summary line and the paint list. Used by the main list (all storages)
+ * and by a storage page (storageId: only paints in it; +/- and counts work in that storage).
+ */
+function paintBrowser({ f, storageId = null, tags, storages, makers, emptyText, emptyBig = null, onFabHref = null }) {
+  // forget filters that point to deleted tags/storages/manufacturers
   const tagIds = new Set(tags.map(t => t.id));
-  for (const id of [...filters.tags]) if (!tagIds.has(id)) filters.tags.delete(id);
-  if (filters.storage && filters.storage !== 'none' && !storages.some(s => String(s.id) === filters.storage)) filters.storage = '';
-  if (filters.maker && !makers.some(m => String(m.id) === filters.maker)) filters.maker = '';
+  for (const id of [...f.tags]) if (!tagIds.has(id)) f.tags.delete(id);
+  if (f.storage && f.storage !== 'none' && !storages.some(s => String(s.id) === f.storage)) f.storage = '';
+  if (f.maker && !makers.some(m => String(m.id) === f.maker)) f.maker = '';
 
   const listBox = h('div');
   const summary = h('div', { class: 'summary' });
-  const fab = h('a', { class: 'fab', href: '#/paint/new', 'aria-label': 'Добавить краску', title: 'Добавить краску' }, '+');
+  let current = [];
 
   const search = h('input', {
-    class: 'input', type: 'search', value: filters.q, enterkeyhint: 'search',
-    placeholder: 'Поиск: название, производитель, код',
-    oninput: debounce(e => { filters.q = e.target.value; refresh(); }, 200),
+    class: 'input', type: 'search', value: f.q, enterkeyhint: 'search',
+    placeholder: storageId ? 'Поиск в этом хранилище' : 'Поиск: название, производитель, код',
+    oninput: debounce(e => { f.q = e.target.value; refresh(); }, 200),
   });
 
-  const storageSel = h('select', { class: 'input', 'aria-label': 'Хранилище', onchange: e => { filters.storage = e.target.value; refresh(); } },
+  const storageSel = storageId ? null : h('select', { class: 'input', 'aria-label': 'Хранилище', onchange: e => { f.storage = e.target.value; refresh(); } },
     h('option', { value: '' }, 'Все хранилища'),
     h('option', { value: 'none' }, 'Без хранилища'),
     storages.map(s => h('option', { value: String(s.id) }, s.name + (s.at_hand ? ' · под рукой' : ''))));
-  storageSel.value = filters.storage;
+  if (storageSel) storageSel.value = f.storage;
 
-  const makerSel = h('select', { class: 'input', 'aria-label': 'Производитель', onchange: e => { filters.maker = e.target.value; refresh(); } },
+  const makerSel = h('select', { class: 'input', 'aria-label': 'Производитель', onchange: e => { f.maker = e.target.value; refresh(); } },
     h('option', { value: '' }, 'Все производители'),
-    makers.filter(m => m.paint_count > 0 || String(m.id) === filters.maker)
-      .map(m => h('option', { value: String(m.id) }, `${m.name} (${m.paint_count})`)));
-  makerSel.value = filters.maker;
+    makers.filter(m => m.paint_count > 0 || String(m.id) === f.maker)
+      .map(m => h('option', { value: String(m.id) }, storageId ? m.name : `${m.name} (${m.paint_count})`)));
+  makerSel.value = f.maker;
 
-  const stockSel = h('select', { class: 'input', 'aria-label': 'Наличие', onchange: e => { filters.stock = e.target.value; refresh(); } },
+  const stockSel = h('select', { class: 'input', 'aria-label': 'Наличие', onchange: e => { f.stock = e.target.value; refresh(); } },
     h('option', { value: '' }, 'Любое наличие'),
     h('option', { value: 'in' }, 'Есть в наличии'),
     h('option', { value: 'out' }, 'Закончились'));
-  stockSel.value = filters.stock;
+  stockSel.value = f.stock;
+  // in a storage every listed paint has pots there, so "used up" makes no sense
+  if (storageId) stockSel.hidden = true;
 
   const chips = h('div', { class: 'chips-scroll' },
-    toggleChip('✋ Под рукой', { plain: true, pressed: filters.atHand, onToggle: v => { filters.atHand = v; refresh(); } }),
+    storageId ? null : toggleChip('✋ Под рукой', { plain: true, pressed: f.atHand, onToggle: v => { f.atHand = v; refresh(); } }),
     tags.map(t => toggleChip(t.name, {
       color: t.color,
-      pressed: filters.tags.has(t.id),
-      onToggle: v => { v ? filters.tags.add(t.id) : filters.tags.delete(t.id); refresh(); },
+      pressed: f.tags.has(t.id),
+      onToggle: v => { v ? f.tags.add(t.id) : f.tags.delete(t.id); refresh(); },
     })));
+
+  const here = p => (storageId
+    ? ((p.locations.find(l => l.storage && l.storage.id === storageId) || {}).quantity || 0)
+    : p.quantity);
+
+  function updateSummary() {
+    const pots = current.reduce((n, p) => n + here(p), 0);
+    summary.replaceChildren(h('span', null, `${countPaints(current.length)} · ${countPots(pots)}`));
+    if (anyFilterIn(f, storageId)) {
+      summary.append(h('button', { type: 'button', onclick: () => { resetFiltersOf(f); render(); } }, 'Сбросить фильтры'));
+    }
+  }
 
   let seq = 0;
   async function refresh() {
     const mySeq = ++seq;
     const params = new URLSearchParams();
-    if (filters.q.trim()) params.set('q', filters.q.trim());
-    if (filters.storage === 'none') params.set('no_storage', 'true');
-    else if (filters.storage) params.set('storage_id', filters.storage);
-    if (filters.maker) params.set('manufacturer_id', filters.maker);
-    filters.tags.forEach(id => params.append('tag_id', id));
-    if (filters.atHand) params.set('at_hand', 'true');
-    if (filters.stock) params.set('in_stock', filters.stock === 'in' ? 'true' : 'false');
-
-    fab.href = filters.storage && filters.storage !== 'none' ? `#/paint/new?storage=${filters.storage}` : '#/paint/new';
+    if (f.q.trim()) params.set('q', f.q.trim());
+    if (storageId) params.set('storage_id', storageId);
+    else if (f.storage === 'none') params.set('no_storage', 'true');
+    else if (f.storage) params.set('storage_id', f.storage);
+    if (f.maker) params.set('manufacturer_id', f.maker);
+    f.tags.forEach(id => params.append('tag_id', id));
+    if (f.atHand && !storageId) params.set('at_hand', 'true');
+    if (f.stock && !storageId) params.set('in_stock', f.stock === 'in' ? 'true' : 'false');
+    if (onFabHref) onFabHref(f);
 
     let paints;
     try {
@@ -568,49 +590,40 @@ async function viewPaints(mount) {
     }
     if (mySeq !== seq) return;
     paintWatchers.clear();
-    updateSummary(paints);
-
-    if (paints.length) {
-      listBox.replaceChildren(paintList(paints));
-    } else if (anyFilter()) {
-      listBox.replaceChildren(h('div', { class: 'empty' }, 'Ничего не нашлось'));
-    } else {
-      listBox.replaceChildren(h('div', { class: 'empty-big' },
-        h('p', null, h('b', null, 'Каталог пока пуст')),
-        h('p', { class: 'muted' }, 'Добавьте первую краску. Хранилища — коробки, ящики, полки — можно завести сразу или потом.'),
-        h('div', { class: 'row', style: 'justify-content:center;margin-top:14px' },
-          h('a', { class: 'btn primary', href: '#/paint/new' }, 'Добавить краску'),
-          h('a', { class: 'btn', href: '#/storages' }, 'Хранилища'))));
-    }
-
-    function updateSummary(list) {
-      const pots = list.reduce((s, p) => s + p.quantity, 0);
-      summary.replaceChildren(h('span', null, `${countPaints(list.length)} · ${countPots(pots)}`));
-      if (anyFilter()) summary.append(h('button', { type: 'button', onclick: resetFilters }, 'Сбросить фильтры'));
-    }
-    listBox._update = updateSummary;
-    listBox._paints = paints;
-  }
-
-  function resetFilters() {
-    resetListFilters();
-    render();
+    current = paints;
+    updateSummary();
+    if (paints.length) listBox.replaceChildren(paintList(paints, { storageId }));
+    else if (anyFilterIn(f, storageId)) listBox.replaceChildren(h('div', { class: 'empty' }, 'Ничего не нашлось'));
+    else listBox.replaceChildren(emptyBig ? emptyBig() : h('div', { class: 'empty' }, emptyText));
   }
 
   // quick +/- changes totals in the summary line
-  const onChanged = () => { if (listBox._update) listBox._update(listBox._paints); };
-  document.addEventListener('paints-changed', onChanged);
-  onLeave(() => document.removeEventListener('paints-changed', onChanged));
+  document.addEventListener('paints-changed', updateSummary);
+  onLeave(() => document.removeEventListener('paints-changed', updateSummary));
 
-  await refresh();
-  mount(h('div', null,
-    h('div', { class: 'filters' },
-      search,
-      h('div', { class: 'filter-row' }, storageSel, stockSel, makerSel),
-      chips),
+  const selects = [storageSel, stockSel, makerSel].filter(Boolean);
+  const el = h('div', null,
+    h('div', { class: 'filters' }, search, h('div', { class: 'filter-row' }, selects), chips),
     summary,
-    listBox,
-    fab));
+    listBox);
+  return { el, refresh };
+}
+
+async function viewPaints(mount) {
+  const [tags, storages, makers] = await Promise.all([api('GET', '/tags'), api('GET', '/storages'), api('GET', '/manufacturers')]);
+  const fab = h('a', { class: 'fab', href: '#/paint/new', 'aria-label': 'Добавить краску', title: 'Добавить краску' }, '+');
+  const browser = paintBrowser({
+    f: filters, tags, storages, makers,
+    onFabHref: f => { fab.href = f.storage && f.storage !== 'none' ? `#/paint/new?storage=${f.storage}` : '#/paint/new'; },
+    emptyBig: () => h('div', { class: 'empty-big' },
+      h('p', null, h('b', null, 'Каталог пока пуст')),
+      h('p', { class: 'muted' }, 'Добавьте первую краску. Хранилища — коробки, ящики, полки — можно завести сразу или потом.'),
+      h('div', { class: 'row', style: 'justify-content:center;margin-top:14px' },
+        h('a', { class: 'btn primary', href: '#/paint/new' }, 'Добавить краску'),
+        h('a', { class: 'btn', href: '#/storages' }, 'Хранилища'))),
+  });
+  await browser.refresh();
+  mount(h('div', null, browser.el, fab));
 }
 
 // ======================= paint form =======================
@@ -1278,9 +1291,16 @@ async function viewStorages(mount) {
     }
   });
 
+  const find = h('input', {
+    class: 'input', type: 'search', placeholder: 'Поиск хранилища', enterkeyhint: 'search',
+    oninput: () => {
+      const q = find.value.trim().toLowerCase();
+      list.querySelectorAll('.storage-card').forEach(c => { c.hidden = q && !c.dataset.search.includes(q); });
+    },
+  });
   const list = storages.length
     ? h('div', { class: 'card-list' }, storages.map(s =>
-      h('a', { class: 'card storage-card', href: `#/storage/${s.id}` },
+      h('a', { class: 'card storage-card', href: `#/storage/${s.id}`, 'data-search': `${s.name} ${s.nfc_tag || ''}`.toLowerCase() },
         h('span', { class: 'storage-icon' + (s.at_hand ? ' hand' : '') }, s.at_hand ? '✋' : '📦'),
         h('div', { class: 'grow' },
           h('div', { class: 'name' }, s.name, ' ',
@@ -1290,16 +1310,22 @@ async function viewStorages(mount) {
         h('span', { class: 'chev' }, '›'))))
     : h('div', { class: 'empty' }, 'Хранилищ пока нет. Коробки, ящики, полки — всё, где лежат краски.');
 
-  mount(h('div', null, pageHead('Хранилища'), form, h('h2', null, 'Все хранилища'), list));
+  mount(h('div', null, pageHead('Хранилища'), form, h('h2', null, 'Все хранилища'), storages.length > 3 ? h('div', { style: 'margin-bottom:8px' }, find) : null, list));
 }
 
 async function viewStorage(mount, id) {
-  const [s, paints, info, storages] = await Promise.all([
+  const [s, info, storages, tags, makers] = await Promise.all([
     api('GET', `/storages/${id}`),
-    api('GET', `/paints?storage_id=${id}`),
     api('GET', '/info').catch(() => ({})),
     api('GET', '/storages'),
+    api('GET', '/tags'),
+    api('GET', '/manufacturers'),
   ]);
+  if (!storageFilters.has(id)) storageFilters.set(id, newFilters());
+  const browser = paintBrowser({
+    f: storageFilters.get(id), storageId: s.id, tags, storages, makers, emptyText: 'Здесь пока пусто',
+  });
+  await browser.refresh();
 
   // a link that works from a phone: use the LAN address if this page was opened as localhost
   const local = ['localhost', '127.0.0.1', '::1', '[::1]'].includes(location.hostname);
@@ -1354,23 +1380,11 @@ async function viewStorage(mount, id) {
   const copyBtn = h('button', { type: 'button', class: 'btn' }, 'Копировать');
   copyBtn.addEventListener('click', async () => toast(await copyText(link) ? 'Ссылка скопирована' : 'Не получилось — выделите ссылку вручную', ''));
 
-  const summary = h('div', { class: 'summary' });
-  const updateSummary = () => {
-    const pots = paints.reduce((n, p) => n + ((p.locations.find(l => l.storage && l.storage.id === s.id) || {}).quantity || 0), 0);
-    summary.replaceChildren(h('span', null, `${countPaints(paints.length)} · ${countPots(pots)}`,
-      s.copies_storage ? ` · дубликаты → ${s.copies_storage.name}` : ''));
-  };
-  updateSummary();
-  document.addEventListener('paints-changed', updateSummary);
-  onLeave(() => document.removeEventListener('paints-changed', updateSummary));
-
   mount(h('div', null,
     pageHead(s.name, '#/storages', s.is_default ? h('span', { class: 'badge' }, 'по умолчанию')
       : s.at_hand ? h('span', { class: 'badge' }, 'под рукой') : null),
-    summary,
-    paints.length
-      ? paintList(paints, { storageId: s.id })
-      : h('div', { class: 'empty' }, 'Здесь пока пусто'),
+    s.copies_storage ? h('div', { class: 'muted small', style: 'margin:-6px 0 10px' }, `Дубликаты предлагаются в «${s.copies_storage.name}»`) : null,
+    browser.el,
     h('div', { class: 'row', style: 'margin-top:12px' },
       h('a', { class: 'btn primary', href: `#/paint/new?storage=${s.id}` }, '+ Добавить краску сюда')),
     h('h2', null, 'Ссылка для метки'),

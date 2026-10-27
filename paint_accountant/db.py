@@ -182,6 +182,13 @@ MIGRATIONS: list[str] = [
         FROM (VALUES ('pigment'), ('pigments')) v
         JOIN tag t ON py_lower(t.name) = 'спецэффект';
     """,
+    # 8 — texture pastes -> "Спецэффект"
+    """
+    INSERT OR IGNORE INTO tag_keyword (keyword, tag_id)
+        SELECT v.column1, t.id
+        FROM (VALUES ('texture'), ('textures')) v
+        JOIN tag t ON py_lower(t.name) = 'спецэффект';
+    """,
 ]
 
 # Starter tags: (name, plaque color, label keywords)

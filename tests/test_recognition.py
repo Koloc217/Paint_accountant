@@ -266,6 +266,7 @@ def test_thinner_label_suggests_technical_tag(client, conn):
         ("Inks", "Чернила"),
         ("Weathering Pigments", "Спецэффект"),
         ("Rust Pigment", "Спецэффект"),
+        ("Astrogranite Texture", "Спецэффект"),
     ],
 )
 def test_label_words_suggest_tags(client, conn, label, tag):

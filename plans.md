@@ -91,7 +91,7 @@
 
 **Стартовые теги** (редактируемые): Грунт, Основа, Слой, Контраст, Проливка, Спецэффект, Металлик, Чернила, Лак, Для аэрографа, Техническая (разбавители, медиумы, замедлители).
 
-**Подсказка тегов по словам с этикетки** (небольшая таблица соответствий, дополняемая): Contrast → Контраст, Shade/Wash → Проливка, Primer → Грунт, Metal → Металлик, Air → Для аэрографа, Technical → Спецэффект, Medium/Thinner/Retarder/Flow improver/Cleaner/Putty/Filler/Restorer → Техническая, Ink/Inks/Dipping/Dip/Quickshade → Чернила, Pigment/Pigments → Спецэффект.
+**Подсказка тегов по словам с этикетки** (небольшая таблица соответствий, дополняемая): Contrast → Контраст, Shade/Wash → Проливка, Primer → Грунт, Metal → Металлик, Air → Для аэрографа, Technical → Спецэффект, Medium/Thinner/Retarder/Flow improver/Cleaner/Putty/Filler/Restorer → Техническая, Ink/Inks/Dipping/Dip/Quickshade → Чернила, Pigment/Pigments/Texture → Спецэффект.
 
 ---
 

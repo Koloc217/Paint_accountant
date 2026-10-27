@@ -810,3 +810,8 @@ main:has(.action-bar) { padding-bottom: calc(76px + env(safe-area-inset-bottom))
 .cat-info .cat-count { color: var(--accent); font-weight: 600; }
 .cat-row > .chev { color: var(--muted); font-size: 20px; flex: none; padding-right: 2px; }
 @media (hover: hover) { .cat-info:hover .cat-title { color: var(--accent); } }
+
+/* wide screens: tag chips wrap onto more lines instead of running off the edge */
+@media (min-width: 600px) {
+  .chips-scroll { flex-wrap: wrap; overflow: visible; }
+}
