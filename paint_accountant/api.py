@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import sqlite3
 from typing import Iterator
 
@@ -75,6 +76,19 @@ def health(conn: sqlite3.Connection = Conn) -> dict:
 def info(request: Request) -> dict:
     """Version and the address other devices on the network can use (for NFC/QR links)."""
     return {"version": __version__, "lan_url": lan_url(request.app.state.settings.port)}
+
+
+@router.get("/qr.svg", tags=["system"], response_class=Response,
+            responses={200: {"content": {"image/svg+xml": {}}}})
+def qr_code(data: str = Query(..., min_length=1, max_length=500, description="text or link to encode")) -> Response:
+    """QR code as SVG — for printing storage labels."""
+    try:
+        import segno
+    except ImportError:
+        raise HTTPException(503, "QR codes need the segno package: pip install -r requirements.txt")
+    buf = io.BytesIO()
+    segno.make(data, error="m", micro=False).save(buf, kind="svg", border=2, omitsize=True, xmldecl=False, light="#fff")
+    return Response(buf.getvalue(), media_type="image/svg+xml", headers={"Cache-Control": "max-age=86400"})
 
 
 # ---------------- paints ----------------

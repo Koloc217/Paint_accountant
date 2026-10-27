@@ -434,6 +434,7 @@ const routes = [
   [/^#\/storages$/, (m, mount) => viewStorages(mount)],
   [/^#\/storage\/(\d+)$/, (m, mount) => viewStorage(mount, Number(m[1]))],
   [/^#\/catalogs$/, (m, mount) => viewCatalogs(mount)],
+  [/^#\/labels(?:\?ids=([\d,]+))?$/, (m, mount) => viewLabels(mount, m[1] ? m[1].split(',').map(Number) : null)],
   [/^#\/tags$/, () => location.replace('#/catalogs')],
 ];
 
@@ -446,7 +447,7 @@ let cleanups = [];
 function onLeave(fn) { cleanups.push(fn); }
 
 function highlightTab(hash) {
-  const tab = hash.startsWith('#/storage') ? 'storages' : hash.startsWith('#/catalogs') ? 'catalogs' : 'paints';
+  const tab = hash.startsWith('#/storage') || hash.startsWith('#/labels') ? 'storages' : hash.startsWith('#/catalogs') ? 'catalogs' : 'paints';
   document.querySelectorAll('.tabs a').forEach(a => a.classList.toggle('active', a.dataset.tab === tab));
 }
 
@@ -1308,7 +1309,8 @@ async function viewStorages(mount) {
         h('span', { class: 'chev' }, '›'))))
     : h('div', { class: 'empty' }, 'Хранилищ пока нет. Коробки, ящики, полки — всё, где лежат краски.');
 
-  mount(h('div', null, pageHead('Хранилища'), form, h('h2', null, 'Все хранилища'), storages.length > 3 ? h('div', { style: 'margin-bottom:8px' }, find) : null, list));
+  mount(h('div', null, pageHead('Хранилища', null,
+    storages.length ? h('a', { class: 'btn', href: '#/labels', style: 'margin-left:auto' }, '🖨 QR-метки') : null), form, h('h2', null, 'Все хранилища'), storages.length > 3 ? h('div', { style: 'margin-bottom:8px' }, find) : null, list));
 }
 
 async function viewStorage(mount, id) {
@@ -1325,10 +1327,7 @@ async function viewStorage(mount, id) {
   });
   await browser.refresh();
 
-  // a link that works from a phone: use the LAN address if this page was opened as localhost
-  const local = ['localhost', '127.0.0.1', '::1', '[::1]'].includes(location.hostname);
-  const base = local && info.lan_url ? info.lan_url : location.origin;
-  const link = `${base}/storage/${s.id}`;
+  const link = storageLink(info, s.id);
 
   const nameInput = h('input', { class: 'input', id: 's-name', value: s.name, maxlength: 100, required: true });
   const tagInput = h('input', { class: 'input', id: 's-tag', value: s.nfc_tag || '', maxlength: 100, autocomplete: 'off' });
@@ -1385,14 +1384,105 @@ async function viewStorage(mount, id) {
     browser.el,
     h('div', { class: 'row', style: 'margin-top:12px' },
       h('a', { class: 'btn primary', href: `#/paint/new?storage=${s.id}` }, '+ Добавить краску сюда')),
-    h('h2', null, 'Ссылка для метки'),
-    h('div', { class: 'panel' },
-      h('div', { class: 'link-box' }, h('code', null, link), copyBtn),
-      h('p', { class: 'muted small', style: 'margin:10px 0 0' },
-        'Запишите эту ссылку в NFC-метку (например, приложением NFC Tools: «Записать» → «URL») или сделайте из неё QR-код. ',
-        'Телефон в той же сети откроет это хранилище сразу.')),
+    h('h2', null, 'Метка'),
+    h('div', { class: 'panel qr-panel' },
+      qrImg(link),
+      h('div', { class: 'grow' },
+        h('div', { class: 'link-box' }, h('code', null, link), copyBtn),
+        h('p', { class: 'muted small', style: 'margin:10px 0' },
+          'Наведите камеру телефона на QR-код — откроется это хранилище (телефон должен быть в той же сети). ',
+          'Ссылку можно записать и в NFC-метку (например, приложением NFC Tools: «Записать» → «URL»).'),
+        h('a', { class: 'btn', href: `#/labels?ids=${s.id}` }, '🖨 Напечатать метку'))),
     h('h2', null, 'Настройки'),
     h('details', { class: 'panel' }, h('summary', null, 'Название, метка, по умолчанию, дубликаты, удаление'), settings)));
+}
+
+// ======================= QR labels =======================
+
+/** Link to a storage that works from a phone: the LAN address if this page was opened as localhost. */
+function storageLink(info, id) {
+  const local = ['localhost', '127.0.0.1', '::1', '[::1]'].includes(location.hostname);
+  const base = local && info.lan_url ? info.lan_url : location.origin;
+  return `${base}/storage/${id}`;
+}
+
+function qrImg(link, cls = 'qr') {
+  const img = h('img', { class: cls, alt: 'QR-код', src: `/api/qr.svg?data=${encodeURIComponent(link)}` });
+  img.addEventListener('error', () => img.replaceWith(h('div', { class: cls + ' qr-missing muted small' },
+    'QR не получился — обновите зависимости: pip install -r requirements.txt')));
+  return img;
+}
+
+const LABEL_SIZES = [['s', '3 см'], ['m', '4 см'], ['l', '5,5 см']];
+const getLabelSize = () => { try { return localStorage.getItem('pa.labelSize') || 'm'; } catch { return 'm'; } };
+
+async function viewLabels(mount, preselected) {
+  const [storages, info] = await Promise.all([api('GET', '/storages'), api('GET', '/info').catch(() => ({}))]);
+  const chosen = new Set(preselected ? preselected.filter(id => storages.some(s => s.id === id)) : storages.map(s => s.id));
+  let size = getLabelSize();
+
+  const sheet = h('div', { class: 'label-sheet' });
+  const drawSheet = () => {
+    sheet.className = `label-sheet size-${size}`;
+    const picked = storages.filter(s => chosen.has(s.id));
+    sheet.replaceChildren(...(picked.length
+      ? picked.map(s => h('div', { class: 'qr-label' },
+        qrImg(storageLink(info, s.id), 'qr-label-code'),
+        h('div', { class: 'qr-label-name' }, s.name)))
+      : [h('div', { class: 'empty no-print' }, 'Отметьте хранилища, для которых нужны метки')]));
+    count.textContent = picked.length ? `Меток: ${picked.length}` : '';
+  };
+
+  const count = h('span', { class: 'muted small' });
+  const checks = storages.map(s => {
+    const box = h('input', { type: 'checkbox', checked: chosen.has(s.id) });
+    box.addEventListener('change', () => { box.checked ? chosen.add(s.id) : chosen.delete(s.id); drawSheet(); });
+    return h('label', { class: 'check' }, box, s.name);
+  });
+  const all = h('button', { type: 'button', class: 'btn small' }, 'Все');
+  const none = h('button', { type: 'button', class: 'btn small' }, 'Ни одного');
+  const setAll = on => {
+    storages.forEach(s => (on ? chosen.add(s.id) : chosen.delete(s.id)));
+    checks.forEach(l => { l.querySelector('input').checked = on; });
+    drawSheet();
+  };
+  all.addEventListener('click', () => setAll(true));
+  none.addEventListener('click', () => setAll(false));
+
+  const seg = h('div', { class: 'seg' }, LABEL_SIZES.map(([key, label]) => {
+    const b = h('button', { type: 'button', 'aria-pressed': String(key === size) }, label);
+    b.addEventListener('click', () => {
+      size = key;
+      try { localStorage.setItem('pa.labelSize', key); } catch { /* private mode */ }
+      seg.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+      drawSheet();
+    });
+    return b;
+  }));
+
+  const printBtn = h('button', { type: 'button', class: 'btn primary' }, '🖨 Печать');
+  printBtn.addEventListener('click', () => {
+    if (!chosen.size) { toast('Не выбрано ни одного хранилища', 'err'); return; }
+    window.print();
+  });
+
+  const base = storageLink(info, 0).replace(/\/storage\/0$/, '');
+  drawSheet();
+  mount(h('div', null,
+    h('div', { class: 'no-print' },
+      pageHead('QR-метки', '#/storages'),
+      h('div', { class: 'panel' },
+        h('div', { class: 'field' }, h('label', null, 'Ширина метки'), seg),
+        h('div', { class: 'field' },
+          h('label', null, 'Хранилища ', h('span', { class: 'label-picks' }, all, none)),
+          h('div', { class: 'label-checks' }, checks)),
+        h('div', { class: 'row', style: 'align-items:center' }, printBtn, count)),
+      h('p', { class: 'muted small' },
+        'Метки ведут на адрес ', h('code', null, base), '. Если у компьютера сменится IP, напечатанные метки перестанут открываться — ',
+        'закрепите за ним адрес в настройках роутера (резервирование DHCP). ',
+        'Печатайте в масштабе 100% («Фактический размер»), режьте по пунктиру, сверху можно заклеить скотчем.'),
+      h('h2', null, 'Предпросмотр')),
+    sheet));
 }
 
 // ======================= catalogs: manufacturers and tags =======================

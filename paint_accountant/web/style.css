@@ -815,3 +815,32 @@ main:has(.action-bar) { padding-bottom: calc(76px + env(safe-area-inset-bottom))
 @media (min-width: 600px) {
   .chips-scroll { flex-wrap: wrap; overflow: visible; }
 }
+
+/* ---------- QR labels ---------- */
+.qr-panel { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+.qr-panel .grow { min-width: 220px; }
+img.qr { width: 132px; height: 132px; background: #fff; border-radius: 8px; padding: 4px; flex: none; }
+.qr-missing { width: 132px; padding: 8px; border: 1px dashed var(--line); border-radius: 8px; }
+.label-checks { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.label-picks { display: inline-flex; gap: 6px; margin-left: 8px; vertical-align: middle; }
+.btn.small { padding: 3px 10px; font-size: 13px; min-height: 0; }
+
+.label-sheet { --qr: 30mm; display: flex; flex-wrap: wrap; gap: 0; background: #fff; color: #000;
+  padding: 8px; border-radius: 8px; }
+.label-sheet.size-s { --qr: 22mm; }
+.label-sheet.size-m { --qr: 30mm; }
+.label-sheet.size-l { --qr: 44mm; }
+.qr-label { width: max(calc(var(--qr) + 8mm), 30mm); padding: 3mm 4mm; border: 1px dashed #999; margin: -1px 0 0 -1px;
+  display: flex; flex-direction: column; align-items: center; gap: 1.5mm; break-inside: avoid; page-break-inside: avoid; }
+.qr-label-code { width: var(--qr); height: var(--qr); display: block; }
+.qr-label-name { font: 600 calc(var(--qr) * .11 + 5pt)/1.15 system-ui, sans-serif; text-align: center;
+  overflow-wrap: break-word; hyphens: auto; max-width: 100%; }
+.label-sheet .qr-missing { width: var(--qr); height: var(--qr); }
+
+@media print {
+  @page { margin: 10mm; }
+  html, body { background: #fff !important; }
+  .topbar, .no-print, #toast, .fab, .action-bar { display: none !important; }
+  main, #view { padding: 0 !important; margin: 0 !important; max-width: none !important; }
+  .label-sheet { padding: 1px 0 0 1px; border-radius: 0; }
+}

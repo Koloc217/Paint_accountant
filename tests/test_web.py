@@ -37,3 +37,11 @@ def test_info(client):
     data = client.get("/api/info").json()
     assert data["version"]
     assert data["lan_url"] is None or data["lan_url"].endswith(":8642")
+
+
+def test_qr_code_svg(client):
+    r = client.get("/api/qr.svg", params={"data": "http://192.168.1.5:8642/storage/1"})
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("image/svg+xml")
+    assert r.text.startswith("<svg") and "viewBox" in r.text
+    assert client.get("/api/qr.svg").status_code == 422
