@@ -174,8 +174,11 @@ def norm(text: str) -> str:
     return " ".join(re.sub(r"[^\w]+", " ", text.lower()).split())
 
 
-# words printed on labels that are not part of a paint name
+VOLUME = re.compile(r"\b\d+([.,]\d+)?\s?(ml|fl\.?\s?oz)\b", re.I)
+
+# words printed on labels that are not part of a paint name (English and Spanish — GSW, Vallejo)
 STOPWORDS = {
+    "de", "pintura", "para", "con", "y",
     "ml", "acrylic", "acrylics", "paint", "paints", "colour", "color", "colours", "colors",
     "water", "based", "non", "toxic", "made", "in", "spain", "uk", "china", "for", "use",
     "only", "the", "and", "of", "new", "formula", "warning", "game", "model", "fl", "oz",
@@ -189,6 +192,7 @@ ALIASES = {
     "akinteractive": "AK",
     "kimera kolors": "Kimera",
     "gsw": "Green Stuff World",
+    "green stuf world": "Green Stuff World",
     "greenstuffworld": "Green Stuff World",
     "the army painter": "Army Painter",
     "army painter": "Army Painter",
@@ -205,6 +209,8 @@ CODE_PATTERNS: list[tuple[str | None, re.Pattern, Any]] = [
     ("Army Painter", re.compile(r"\b(WP|CP|GM)\s?(\d{4})\b", re.I), lambda m: f"{m[1].upper()}{m[2]}"),
     ("Tamiya", re.compile(r"\b(XF|X|LP|TS|AS)\s?-\s?(\d{1,3})\b", re.I), lambda m: f"{m[1].upper()}-{m[2]}"),
     ("Citadel", re.compile(r"\b(\d{2})\s?-\s?(\d{2})\b"), lambda m: f"{m[1]}-{m[2]}"),
+    # Green Stuff World: "1750 - PAINT REVITALIZER"
+    ("Green Stuff World", re.compile(r"\b(\d{4,5})\s*[-–]\s*[A-Za-z]"), lambda m: m[1]),
 ]
 
 
@@ -224,30 +230,47 @@ def _nice_name(text: str) -> str:
     return text
 
 
-def _match_manufacturer(lines: list[Line], makers: list[dict]) -> tuple[dict | None, Line | None]:
+def _maker_score(text: str, key: str, by_alias: bool) -> float:
     from rapidfuzz import fuzz
 
+    if by_alias:
+        return 99
+    if len(key) <= 3:
+        return 100 if key in text.split() else 0  # short names like "AK": whole word only
+    if len(text) >= len(key) - 1:
+        return fuzz.partial_ratio(key, text)
+    return fuzz.ratio(key, text)
+
+
+def _match_manufacturer(lines: list[Line], makers: list[dict]) -> tuple[dict | None, list[Line]]:
+    """Best manufacturer on the label and the line(s) it's printed on.
+
+    A brand is often stacked over several lines ("GREEN" / "STUFF" / "WORLD"), so groups of
+    2-3 consecutive lines are tried too — but only when no single line matches as well, and
+    only if the group isn't much longer than the name (so "CITADEL" + "NULN OIL" stays apart).
+    """
     by_name = {norm(m["name"]): m for m in makers}
-    best: tuple[float, dict | None, Line | None] = (0, None, None)
-    for line in lines:
-        text = norm(line.text)
-        if not text:
-            continue
-        words = set(text.split())
+    aliases = [(alias, by_name.get(norm(canonical))) for alias, canonical in ALIASES.items()]
+    candidates: list[tuple[str, list[Line]]] = []
+    for size in (1, 2, 3):
+        for i in range(len(lines) - size + 1):
+            group = lines[i:i + size]
+            text = norm(" ".join(ln.text for ln in group))
+            if text:
+                candidates.append((text, group))
+
+    best: tuple[float, dict | None, list[Line]] = (0, None, [])
+    for text, group in candidates:
         squashed = text.replace(" ", "")
-        for alias, canonical in ALIASES.items():
-            m = by_name.get(norm(canonical))
-            if m and (alias in text or alias.replace(" ", "") in squashed):
-                score = 99
-                if score > best[0]:
-                    best = (score, m, line)
-        for key, m in by_name.items():
-            if len(key) <= 3:
-                score = 100 if key in words else 0  # short names like "AK": whole word only
-            else:
-                score = fuzz.partial_ratio(key, text) if len(text) >= len(key) - 1 else fuzz.ratio(key, text)
+        options = [(m, alias, True) for alias, m in aliases
+                   if m and (alias in text or alias.replace(" ", "") in squashed)]
+        options += [(m, key, False) for key, m in by_name.items()]
+        for m, key, by_alias in options:
+            if len(group) > 1 and len(text) > len(key) * 1.4 + 3:
+                continue
+            score = _maker_score(text, key, by_alias)
             if score >= 88 and score > best[0]:
-                best = (score, m, line)
+                best = (score, m, group)
     return best[1], best[2]
 
 
@@ -271,9 +294,9 @@ def suggest(conn: sqlite3.Connection, reading: Reading) -> dict[str, Any]:
         if ln.score < 0.5 or len(norm(ln.text)) < 2 or not re.search(r"[A-Za-z]{2}|\d", ln.text):
             ln.kind = "noise"
 
-    maker, maker_line = _match_manufacturer([ln for ln in lines if ln.kind != "noise"], makers)
-    if maker_line is not None:
-        maker_line.kind = "manufacturer"
+    maker, maker_lines = _match_manufacturer([ln for ln in lines if ln.kind != "noise"], makers)
+    for ln in maker_lines:
+        ln.kind = "manufacturer"
 
     code = find_code(full_text, maker["name"] if maker else None)
 
@@ -283,21 +306,36 @@ def suggest(conn: sqlite3.Connection, reading: Reading) -> dict[str, Any]:
         words = norm(ln.text).split()
         if code and find_code(ln.text) == code and len(words) <= 2:
             ln.kind = "code"
+        elif VOLUME.search(ln.text):
+            ln.kind = "noise"  # "60ml (2.02 fl.oz.)"
         elif all(w in keyword_set or w in STOPWORDS or re.fullmatch(r"\d+(ml)?", w) for w in words):
-            ln.kind = "tag" if any(w in keyword_set for w in words) else "noise"
+            if any(w in keyword_set for w in words):
+                ln.kind = "tag"
+            else:
+                # only generic words ("PAINT"): not a name on its own, but can be part of one
+                ln.kind = "filler" if all(w.isalpha() for w in words) else "noise"
 
     # --- name: the biggest remaining text is usually the paint name
-    name_line = max((ln for ln in lines if ln.kind == "other"), key=lambda ln: ln.height, default=None)
+    # if every remaining line is made of tag words ("PAINT" / "REVITALIZER"), the biggest one is the name
+    candidates = [ln for ln in lines if ln.kind == "other"] or [ln for ln in lines if ln.kind == "tag"]
+    name_line = max(candidates, key=lambda ln: ln.height, default=None)
     name_parts: list[Line] = []
     if name_line is not None:
-        # a long name is often printed on two lines in the same size: "FLAT" / "BLACK"
+        # a long name is often printed on two lines in the same size: "FLAT" / "BLACK",
+        # "PAINT" / "REVITALIZER" — join neighbours above and below
+        hh = name_line.height
+        joinable = lambda ln: ln.kind in ("other", "filler", "tag") and abs(ln.height - hh) <= 0.25 * hh  # noqa: E731
         name_parts = [name_line]
         for ln in sorted((x for x in lines if x.y > name_line.y), key=lambda x: x.y):
-            last = name_parts[-1]
-            gap = ln.y - (last.y + last.height)
-            same_size = abs(ln.height - name_line.height) <= 0.25 * name_line.height
-            if ln.kind == "other" and same_size and -0.2 * name_line.height <= gap <= 0.9 * name_line.height:
+            gap = ln.y - (name_parts[-1].y + name_parts[-1].height)
+            if joinable(ln) and -0.2 * hh <= gap <= 0.9 * hh:
                 name_parts.append(ln)
+            else:
+                break
+        for ln in sorted((x for x in lines if x.y < name_line.y), key=lambda x: -x.y):
+            gap = name_parts[0].y - (ln.y + ln.height)
+            if joinable(ln) and -0.2 * hh <= gap <= 0.9 * hh:
+                name_parts.insert(0, ln)
             else:
                 break
         for ln in name_parts:

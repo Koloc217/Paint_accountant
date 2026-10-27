@@ -277,3 +277,36 @@ def test_label_words_suggest_tags(client, conn, label, tag):
 def test_scale75_on_label(conn):
     r = suggest(conn, _reading(("SCALE 75", 20), ("Ink Black", 50)))
     assert r["suggestion"]["manufacturer"]["name"] == "Scale75"
+
+
+def _real(lines):
+    """Lines as OCR read them from a real photo: (text, y, height)."""
+    return Reading(lines=[Line(text=t, score=0.95, x=50, y=y, height=hh) for t, y, hh in lines])
+
+
+def test_green_stuff_world_stacked_brand_and_two_line_name(client, conn):
+    # read from a real photo of GSW "Paint Revitalizer"; note "STUF" — an OCR slip
+    r = suggest(conn, _real([
+        ("GREEN", 341, 118), ("STUF", 415, 108), ("WORLD", 489, 93),
+        ("PAINT", 667, 94), ("REVITALIZER", 754, 96), ("60ml (2.02 ffl.oz.)", 1016, 79),
+    ]))
+    s = r["suggestion"]
+    assert s["manufacturer"]["name"] == "Green Stuff World"
+    assert s["name"] == "Paint Revitalizer"
+    assert _tag_id(client, "Техническая") in s["tag_ids"]
+    kinds = {ln["text"]: ln["kind"] for ln in r["lines"]}
+    assert kinds["GREEN"] == kinds["STUF"] == kinds["WORLD"] == "manufacturer"
+    assert kinds["60ml (2.02 ffl.oz.)"] == "noise"
+
+
+def test_gsw_reference_code(conn):
+    r = suggest(conn, _real([("GREEN STUFF WORLD", 10, 40), ("Paint Revitalizer", 80, 90),
+                             ("1750 - PAINT REVITALIZER", 200, 20)]))
+    assert r["suggestion"]["code"] == "1750"
+    assert r["suggestion"]["name"] == "Paint Revitalizer"
+
+
+def test_brand_and_name_on_neighbouring_lines_stay_apart(conn):
+    r = suggest(conn, _real([("CITADEL", 10, 30), ("NULN OIL", 45, 70)]))
+    assert r["suggestion"]["manufacturer"]["name"] == "Citadel"
+    assert r["suggestion"]["name"] == "Nuln Oil"

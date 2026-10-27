@@ -195,6 +195,13 @@ MIGRATIONS: list[str] = [
         SELECT 'Scale75'
         WHERE NOT EXISTS (SELECT 1 FROM manufacturer WHERE replace(py_lower(name), ' ', '') = 'scale75');
     """,
+    # 10 — paint revitalizers (Green Stuff World and others) -> "Техническая"
+    """
+    INSERT OR IGNORE INTO tag_keyword (keyword, tag_id)
+        SELECT v.column1, t.id
+        FROM (VALUES ('revitalizer'), ('revitalizador')) v
+        JOIN tag t ON py_lower(t.name) = 'техническая';
+    """,
 ]
 
 # Starter tags: (name, plaque color, label keywords)
