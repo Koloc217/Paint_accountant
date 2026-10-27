@@ -275,6 +275,8 @@ const EN = {
   "Вход по паролю": "Password sign-in",
   "Пароль передаётся по сети без шифрования (http), поэтому не используйте пароль от важных аккаунтов. ": "The password travels over the network unencrypted (http), so don't reuse a password from important accounts. ",
   "Краски": "Paints",
+  "💾 Сохранить картинку": "💾 Save image",
+  "Не получилось сохранить картинку": "Couldn't save the image",
 };
 
 // the static parts of index.html
