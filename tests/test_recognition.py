@@ -24,6 +24,8 @@ pytest.importorskip("rapidfuzz")
     [
         ("Model Color 70.951 White", None, "70.951"),
         ("70,951", None, "70.951"),
+        ("Exhaust Manifold 77.723 Metal Color", None, "77.723"),
+        ("72.001", None, "72.001"),
         ("SHADE 24-14", None, "24-14"),
         ("AK 11001 Pure White", None, "AK11001"),
         ("ak-11001", None, "AK11001"),

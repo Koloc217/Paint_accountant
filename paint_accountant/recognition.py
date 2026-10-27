@@ -197,7 +197,8 @@ ALIASES = {
 
 # product codes: (manufacturer it usually belongs to, pattern, formatter)
 CODE_PATTERNS: list[tuple[str | None, re.Pattern, Any]] = [
-    ("Vallejo", re.compile(r"\b(7[0-4])\s?[.,·]\s?(\d{3})\b"), lambda m: f"{m[1]}.{m[2]}"),
+    # Vallejo: 70.xxx Model Color, 71.xxx Model Air, 72.xxx Game Color, 77.xxx Metal Color, 26/28/62/69 etc.
+    ("Vallejo", re.compile(r"\b([2-7]\d)\s?[.,·]\s?(\d{3})\b"), lambda m: f"{m[1]}.{m[2]}"),
     ("AK", re.compile(r"\bAK\s?-?\s?(\d{3,5})\b", re.I), lambda m: f"AK{m[1]}"),
     ("Army Painter", re.compile(r"\b(WP|CP|GM)\s?(\d{4})\b", re.I), lambda m: f"{m[1].upper()}{m[2]}"),
     ("Tamiya", re.compile(r"\b(XF|X|LP|TS|AS)\s?-\s?(\d{1,3})\b", re.I), lambda m: f"{m[1].upper()}-{m[2]}"),
