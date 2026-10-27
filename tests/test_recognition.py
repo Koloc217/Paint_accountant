@@ -349,3 +349,79 @@ def test_known_paint_found_from_cut_name(client, conn):
     client.post("/api/paints", json={"name": "Gunmetal Grey", "manufacturer": "Vallejo", "code": "70.863"})
     r = suggest(conn, _real(VALLEJO_MODEL_COLOR))
     assert r["matches"] and r["matches"][0]["paint"]["name"] == "Gunmetal Grey"
+
+
+# read from a real photo of a Green Stuff World chrome paint: OCR lost "GREEN"
+GSW_CHROME = [("STUFF", 100, 40), ("WORLD", 145, 40), ("CHROME", 300, 60), ("METAL", 365, 60),
+              ("COPPER", 430, 60), ("CHROME METAL", 520, 25), ("17mle(0.57f1.oz.)", 600, 20)]
+GSW_BARCODE = {"text": "8435646510545", "format": "EAN13"}
+
+
+def _with_barcode(lines, *codes):
+    r = _real(lines)
+    r.barcodes = list(codes)
+    return r
+
+
+def _add(client, **paint):
+    r = client.post("/api/paints", json={"quantity": 1, "allow_duplicate": True} | paint)
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def test_two_words_of_a_long_brand_are_enough(conn):
+    r = suggest(conn, _real(GSW_CHROME))
+    assert r["suggestion"]["manufacturer"]["name"] == "Green Stuff World"
+    assert r["suggestion"]["name"] != "Stuff"
+    kinds = {ln["text"]: ln["kind"] for ln in r["lines"]}
+    assert kinds["STUFF"] == kinds["WORLD"] == "manufacturer"
+    assert kinds["17mle(0.57f1.oz.)"] == "noise"  # volume, even misread
+
+
+def test_other_brand_with_the_same_word_is_not_a_match(client, conn):
+    # the screenshot case: Vallejo "Copper" offered at 100% for a GSW pot with a new barcode
+    _add(client, name="Copper", manufacturer="Vallejo", code="77.710")
+    r = suggest(conn, _with_barcode(GSW_CHROME, GSW_BARCODE))
+    assert r["suggestion"]["manufacturer"]["name"] == "Green Stuff World"
+    assert r["matches"] == []
+
+
+def test_brand_from_barcode_when_the_text_has_none(client, conn):
+    r = suggest(conn, _with_barcode([("COPPER", 100, 60)], GSW_BARCODE))
+    assert r["suggestion"]["manufacturer"]["name"] == "Green Stuff World"
+    r = suggest(conn, _with_barcode([("NULN OIL", 100, 60)], {"text": "5011921026845", "format": "EAN13"}))
+    assert r["suggestion"]["manufacturer"]["name"] == "Citadel"
+
+
+def test_brand_from_barcodes_already_in_the_catalog(client, conn):
+    # a brand without a built-in prefix: learned from a saved paint
+    _add(client, name="Rosso", manufacturer="Kimera", barcode="8051234000017")
+    r = suggest(conn, _with_barcode([("BLU", 100, 60)], {"text": "8051234000024", "format": "EAN13"}))
+    assert r["suggestion"]["manufacturer"]["name"] == "Kimera"
+
+
+def test_paint_with_its_own_different_barcode_is_another_paint(client, conn):
+    _add(client, name="Chrome Copper", manufacturer="Green Stuff World", barcode="8435646510999")
+    r = suggest(conn, _with_barcode(GSW_CHROME, GSW_BARCODE))
+    assert r["matches"] == []
+    # without a barcode on the photo it's still a fair guess
+    r = suggest(conn, _real(GSW_CHROME))
+    assert [m["paint"]["name"] for m in r["matches"]] == ["Chrome Copper"]
+
+
+def test_same_brand_paint_without_barcode_still_matches(client, conn):
+    _add(client, name="Chrome Copper", manufacturer="Green Stuff World")
+    r = suggest(conn, _with_barcode(GSW_CHROME, GSW_BARCODE))
+    assert [m["paint"]["name"] for m in r["matches"]] == ["Chrome Copper"]
+
+
+def test_one_common_word_of_unknown_brand_is_only_a_hint(client, conn):
+    _add(client, name="Copper", manufacturer="Vallejo")
+    r = suggest(conn, _real([("COPPER", 100, 60), ("acrylic", 200, 20)]))
+    assert r["suggestion"]["manufacturer"] is None
+    assert r["matches"] and r["matches"][0]["score"] < 90
+
+
+def test_storage_qr_in_the_frame_is_not_a_barcode(conn):
+    r = suggest(conn, _with_barcode([("NULN OIL", 100, 60)], {"text": "http://192.168.1.94:8642/storage/2", "format": "QRCode"}))
+    assert r["suggestion"]["barcode"] is None and r["barcodes"] == []

@@ -174,7 +174,8 @@ def norm(text: str) -> str:
     return " ".join(re.sub(r"[^\w]+", " ", text.lower()).split())
 
 
-VOLUME = re.compile(r"\b\d+([.,]\d+)?\s?(ml|fl\.?\s?oz)\b", re.I)
+# "60ml (2.02 fl.oz.)", also with OCR slips: "17mle(0.57f1.oz.)"
+VOLUME = re.compile(r"\b\d+([.,]\d+)?\s?(ml|fl\.?\s?oz)|f[l1]\.?\s?oz\b", re.I)
 
 # words printed on labels that are not part of a paint name (English and Spanish — GSW, Vallejo)
 STOPWORDS = {
@@ -273,6 +274,11 @@ def _match_manufacturer(lines: list[Line], makers: list[dict]) -> tuple[dict | N
     """
     by_name = {norm(m["name"]): m for m in makers}
     aliases = [(alias, by_name.get(norm(canonical))) for alias, canonical in ALIASES.items()]
+    # two neighbouring words of a long name are enough: OCR dropped "GREEN", "STUFF WORLD" is left
+    for key, m in by_name.items():
+        words = key.split()
+        if len(words) >= 3:
+            aliases += [(p, m) for p in (" ".join(words[i:i + 2]) for i in range(len(words) - 1)) if len(p) >= 9]
     candidates: list[tuple[str, list[Line]]] = []
     for size in (1, 2, 3):
         for i in range(len(lines) - size + 1):
@@ -294,6 +300,32 @@ def _match_manufacturer(lines: list[Line], makers: list[dict]) -> tuple[dict | N
             if score >= 88 and score > best[0]:
                 best = (score, m, group)
     return best[1], best[2]
+
+
+# EAN-13: the first digits are the company's number. Known ones; the catalog adds more (see below).
+BARCODE_PREFIXES = {
+    "8429551": "Vallejo",
+    "8435646": "Green Stuff World",
+    "5011921": "Citadel",
+    "5713799": "Army Painter",
+    "8435568": "AK",
+    "4950344": "Tamiya",
+}
+PREFIX_LEN = 7
+
+
+def _maker_by_barcode(conn: sqlite3.Connection, barcode: str, makers: list[dict]) -> dict | None:
+    """Manufacturer whose paints in the catalog have barcodes from the same company — or a known prefix."""
+    if not re.fullmatch(r"\d{12,13}", barcode or ""):
+        return None
+    prefix = barcode.zfill(13)[:PREFIX_LEN]
+    ids = {r["manufacturer_id"] for r in conn.execute(
+        "SELECT DISTINCT manufacturer_id FROM paint WHERE substr(printf('%013d', barcode), 1, ?) = ? "
+        "AND barcode GLOB '[0-9]*'", (PREFIX_LEN, prefix))}
+    if len(ids) == 1:
+        return next((m for m in makers if m["id"] in ids), None)
+    known = BARCODE_PREFIXES.get(prefix)
+    return next((m for m in makers if known and norm(m["name"]) == norm(known)), None)
 
 
 def _tag_ids(text: str, keywords: list[tuple[str, int]]) -> list[int]:
@@ -324,6 +356,9 @@ def suggest(conn: sqlite3.Connection, reading: Reading) -> dict[str, Any]:
     if maker is None and code_maker in TELLING_CODES:
         # "70.863" is Vallejo even when the logo is unreadable
         maker = next((m for m in makers if norm(m["name"]) == norm(code_maker)), None)
+    if maker is None:
+        # the barcode tells the company: 8435646… is Green Stuff World
+        maker = next(filter(None, (_maker_by_barcode(conn, b["text"], makers) for b in reading.barcodes)), None)
 
     code_line = None
     for ln in lines:
@@ -384,6 +419,8 @@ def suggest(conn: sqlite3.Connection, reading: Reading) -> dict[str, Any]:
     matches: dict[int, dict] = {}
     barcodes = []
     for b in reading.barcodes:
+        if re.match(r"https?://", b["text"], re.I):
+            continue  # a storage QR label in the frame, not the pot's barcode
         paint = repo.find_paint_by_barcode(conn, b["text"])
         barcodes.append({**b, "paint_id": paint["id"] if paint else None})
         if paint:
@@ -400,10 +437,16 @@ def suggest(conn: sqlite3.Connection, reading: Reading) -> dict[str, Any]:
             for w in pname.split() if len(w) >= 3
         )
 
+    new_barcodes = {b["text"] for b in barcodes if b["paint_id"] is None}
+
     if text_lines:
         for paint in repo.list_paints(conn):
             if paint["id"] in matches:
                 continue
+            if maker and paint["manufacturer_id"] != maker["id"]:
+                continue  # another manufacturer is another paint, whatever the name
+            if new_barcodes and paint["barcode"] and paint["barcode"] not in new_barcodes:
+                continue  # it has its own barcode, and the photo shows a different one
             pname = norm(paint["name"])
             if not pname:
                 continue
@@ -411,7 +454,12 @@ def suggest(conn: sqlite3.Connection, reading: Reading) -> dict[str, Any]:
             if len(pname) >= 4:
                 score = max(score, fuzz.partial_ratio(pname, full) * 0.95)
             if maker:
-                score += 5 if paint["manufacturer_id"] == maker["id"] else -15
+                score += 5
+                words = [w for w in pname.split() if len(w) >= 3]
+                if len(words) >= 2 and all(any(fuzz.ratio(w, pw) >= 85 for pw in photo_words) for w in words):
+                    score = max(score, 90)  # "CHROME" / "METAL" / "COPPER" in any order
+            elif len(pname.split()) == 1:
+                score = min(score, 88)  # one common word ("Copper") of an unknown brand is only a hint
             if not every_word_seen(pname):
                 score = min(score, MATCH_THRESHOLD - 1)  # "Matt Black" is not "Flat Black"
             if code and paint["code"] and norm(paint["code"]) == norm(code):
