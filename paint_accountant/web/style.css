@@ -449,22 +449,23 @@ a.card { text-decoration: none; }
 
 /* ---------- form ---------- */
 
-.form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+.form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
 
 .field label, .field .label {
   display: block;
   font-size: 13px;
   font-weight: 600;
   color: var(--muted);
-  margin-bottom: 5px;
+  margin-bottom: 3px;
 }
 
 .field .hint { font-size: 13px; color: var(--muted); margin-top: 4px; }
 
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-@media (max-width: 440px) { .two { grid-template-columns: 1fr; } }
 
-.color-row { display: flex; align-items: center; gap: 10px; }
+
+.color-row { display: flex; align-items: center; gap: 8px; }
+.color-row .input { min-width: 0; }
 .color-row .input { flex: 1; font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
 
 .color-picker {
@@ -478,8 +479,8 @@ a.card { text-decoration: none; }
   flex: none;
 }
 
-.stepper { display: flex; align-items: center; gap: 8px; }
-.stepper .input { width: 90px; text-align: center; }
+.stepper { display: flex; align-items: center; gap: 6px; }
+.stepper .input { width: 56px; text-align: center; padding-inline: 4px; }
 .stepper button { width: 44px; height: 44px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); font-size: 20px; cursor: pointer; }
 
 .tag-picker { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -632,12 +633,12 @@ details.panel[open] summary { margin-bottom: 12px; }
 }
 
 .photo-block, .photo-panel, .photo-section { grid-template-columns: minmax(0, 1fr); }
-.photo-panel { display: grid; gap: 14px; }
+.photo-panel { display: grid; gap: 10px; padding: 12px; }
 .photo-buttons { display: flex; gap: 8px; }
 .photo-buttons .photo-btn { flex: 2 1 0; }
 .photo-buttons .photo-btn.secondary { flex: 1 1 0; color: var(--muted); border-color: var(--line); background: var(--surface); }
 .photo-head { display: flex; align-items: center; gap: 12px; }
-.photo-thumb { width: 64px; height: 64px; object-fit: cover; border-radius: 10px; flex: none; background: var(--chip); }
+.photo-thumb { width: 48px; height: 48px; object-fit: cover; border-radius: 10px; flex: none; background: var(--chip); }
 .photo-section { display: grid; gap: 8px; }
 .photo-section > b { font-size: 15px; }
 
@@ -691,3 +692,44 @@ details.panel[open] summary { margin-bottom: 12px; }
 @media (prefers-reduced-motion: reduce) { .btn.pulse { animation: none; } }
 .flag-steps { margin: 4px 0; padding-left: 20px; display: grid; gap: 10px; }
 .flag-steps .link-box { margin-top: 6px; }
+
+/* ---------- compact form + bottom action bar ---------- */
+
+.qty-row { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: end; }
+
+.icon-btn {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 16px;
+}
+
+.action-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px -16px 0;
+  padding: 8px 16px calc(8px + env(safe-area-inset-bottom));
+  background: color-mix(in srgb, var(--bg) 94%, transparent);
+  backdrop-filter: blur(6px);
+  border-top: 1px solid var(--line);
+}
+.action-bar .spacer { flex: 1; }
+.action-bar .btn { padding-inline: 14px; }
+.action-bar .photo-buttons { display: flex; gap: 6px; }
+.action-bar .photo-btn { width: auto; min-height: 44px; border-width: 1px; padding-inline: 12px; }
+.action-bar .photo-btn.secondary { flex: none; }
+.photo-block:empty { display: none; }
+.action-bar .photo-btn { border-style: solid; }
+main:has(.action-bar) { padding-bottom: 12px; }
+.action-bar .btn { white-space: nowrap; }
+.action-bar { flex-wrap: nowrap; }
+.action-bar > * { min-width: 0; }

@@ -257,8 +257,7 @@ function locationsText(p) {
 function placementSelect(storages, selected, attrs = {}) {
   const def = storages.find(s => s.is_default);
   const sel = h('select', { class: 'input', ...attrs },
-    storages.map(s => h('option', { value: String(s.id) },
-      s.name + (s.is_default ? ' · по умолчанию' : s.at_hand ? ' · под рукой' : ''))),
+    storages.map(s => h('option', { value: String(s.id) }, s.name + (s.at_hand ? ' ✋' : ''))),
     h('option', { value: 'none' }, '— без хранилища —'));
   const pick = selected != null ? selected : def ? def.id : null;
   sel.value = pick == null ? 'none' : String(pick);
@@ -686,7 +685,7 @@ async function viewPaintForm(mount, id, prefillStorage = null) {
   const barcode = h('input', { class: 'input', id: 'f-barcode', maxlength: 100, value: p.barcode || '', inputmode: 'numeric', autocomplete: 'off' });
 
   // color: text field + native picker + preview, kept in sync
-  const preview = swatch(p.hex, true);
+  const preview = swatch(p.hex);
   const hexText = h('input', {
     class: 'input', id: 'f-hex', value: p.hex || '', maxlength: 7, placeholder: '#rrggbb',
     autocomplete: 'off', autocapitalize: 'off', spellcheck: false,
@@ -702,7 +701,7 @@ async function viewPaintForm(mount, id, prefillStorage = null) {
     hexText.classList.remove('invalid');
     setSwatch(preview, picker.value);
   });
-  const clearColor = h('button', { type: 'button', class: 'btn ghost', onclick: () => { hexText.value = ''; hexText.classList.remove('invalid'); setSwatch(preview, null); } }, 'Без цвета');
+  const clearColor = h('button', { type: 'button', class: 'icon-btn', title: 'Без цвета', 'aria-label': 'Без цвета', onclick: () => { hexText.value = ''; hexText.classList.remove('invalid'); setSwatch(preview, null); } }, '✕');
 
   const qty = h('input', { class: 'input', id: 'f-qty', type: 'number', min: 0, step: 1, inputmode: 'numeric', value: '1' });
   const step = d => { qty.value = String(Math.max(0, (parseInt(qty.value, 10) || 0) + d)); };
@@ -828,24 +827,24 @@ async function viewPaintForm(mount, id, prefillStorage = null) {
       h('div', { class: 'field' }, h('label', { for: 'f-code' }, 'Код / артикул'), code),
       h('div', { class: 'field' }, h('label', { for: 'f-barcode' }, 'Штрихкод'), barcode)),
     h('div', { class: 'field' }, h('label', { for: 'f-hex' }, 'Цвет'),
-      h('div', { class: 'color-row' }, preview, hexText, picker),
-      h('div', { class: 'row', style: 'margin-top:4px' }, clearColor)),
+      h('div', { class: 'color-row' }, preview, hexText, picker, clearColor)),
     isNew
-      ? h('div', { class: 'two' },
-        h('div', { class: 'field' }, h('label', { for: 'f-qty' }, 'Банок'),
+      ? h('div', { class: 'qty-row' },
+        h('div', { class: 'field' }, h('label', { for: 'f-qty', title: '0 — закончилась, но остаётся в каталоге' }, 'Банок'),
           h('div', { class: 'stepper' },
             h('button', { type: 'button', 'aria-label': 'Меньше', onclick: () => step(-1) }, '−'),
             qty,
-            h('button', { type: 'button', 'aria-label': 'Больше', onclick: () => step(+1) }, '+')),
-          h('div', { class: 'hint' }, '0 — закончилась, но остаётся в каталоге')),
+            h('button', { type: 'button', 'aria-label': 'Больше', onclick: () => step(+1) }, '+'))),
         h('div', { class: 'field' }, h('label', { for: 'f-storage' }, 'Куда положить'), placement))
       : h('div', { class: 'field' }, h('span', { class: 'label' }, 'Где лежит'), locationsEditor(paint, storages)),
     h('div', { class: 'field' }, h('span', { class: 'label' }, 'Теги'),
       tags.length ? tagPicker : h('div', { class: 'muted small' }, 'Тегов нет — их можно завести в «Справочниках»')),
-    h('div', { class: 'form-actions' },
-      h('button', { type: 'submit', class: 'btn primary' }, isNew ? 'Добавить' : 'Сохранить'),
-      isNew ? h('button', { type: 'submit', class: 'btn', onclick: () => { andAnother = true; } }, 'Добавить и ещё') : null,
+    // stays at the bottom of the screen, also above the on-screen keyboard
+    h('div', { class: 'action-bar' },
+      photoBlock ? photoBlock.buttons : '',
       h('span', { class: 'spacer' }),
+      isNew ? h('button', { type: 'submit', class: 'btn', title: 'Добавить и сразу заполнить следующую', onclick: () => { andAnother = true; } }, '+ ещё') : null,
+      h('button', { type: 'submit', class: 'btn primary' }, isNew ? 'Добавить' : 'Сохранить'),
       isNew ? null : deleteButton('Удалить', () => ({ title: `Удалить «${name.value.trim() || p.name}»?`, text: 'Краска исчезнет из каталога.' }), async () => {
         try {
           await api('DELETE', `/paints/${id}`);
@@ -885,7 +884,7 @@ function photoRecognizer({ status, fill }) {
       'Распознавание по фото не установлено. На компьютере с приложением выполните ',
       h('code', null, (status && status.install) || 'pip install -r requirements-photo.txt'),
       ' и перезапустите его.'));
-    return { el, reset() {} };
+    return { el, buttons: '', reset() {} };
   }
 
   // Phones: "photo" mode — capture="environment" opens the rear camera app straight away (works over
@@ -896,7 +895,7 @@ function photoRecognizer({ status, fill }) {
   const cameraInput = h('input', { type: 'file', accept: 'image/*', capture: 'environment', hidden: true, id: 'f-camera' });
   const input = h('input', { type: 'file', accept: 'image/*', hidden: true, id: 'f-photo' });
   const button = h('button', { type: 'button', class: 'btn photo-btn' });
-  const galleryButton = h('button', { type: 'button', class: 'btn photo-btn secondary' }, touch ? '🖼 Галерея' : '🖼 Загрузить фото этикетки');
+  const galleryButton = h('button', { type: 'button', class: 'btn photo-btn secondary', title: 'Фото из галереи', 'aria-label': 'Фото из галереи' }, touch ? '🖼' : '🖼 Фото этикетки');
   const panel = h('div', { class: 'panel photo-panel', hidden: true });
   let autoTags = [];
   let thumbUrl = null;
@@ -915,7 +914,7 @@ function photoRecognizer({ status, fill }) {
     })) : null;
 
   function labelButton() {
-    button.textContent = mode === 'stream' ? '🎥 Камера' : '📷 Снять этикетку';
+    button.textContent = mode === 'stream' ? '🎥 Камера' : '📷 Снять';
     button.hidden = !touch;
   }
   labelButton();
@@ -1099,7 +1098,6 @@ function photoRecognizer({ status, fill }) {
       panel.replaceChildren(head('Не получилось распознать', err.status === 422 ? 'Файл не похож на фото' : explain(err)));
     } finally {
       button.disabled = galleryButton.disabled = false;
-      button.textContent = '📷 Снять ещё';
     }
   }
 
@@ -1179,9 +1177,7 @@ function photoRecognizer({ status, fill }) {
       markPicked();
       parts.push(h('div', { class: 'photo-section' },
         h('b', null, 'Текст с этикетки'),
-        h('div', { class: 'muted small' },
-          'Название: нажимайте куски по порядку — они склеятся, повторное нажатие убирает кусок. ',
-          'Код и производитель: нажатие заменяет поле.'),
+        h('div', { class: 'muted small' }, 'В название куски добавляются по порядку, повторный тап убирает. Код и производитель — замена.'),
         seg,
         h('div', { class: 'tag-picker' }, chips)));
     } else {
@@ -1229,8 +1225,9 @@ function photoRecognizer({ status, fill }) {
         h('a', { class: 'btn small-btn', href: `#/paint/${p.id}` }, 'Открыть')));
   }
 
-  el.append(modeSeg || '', h('div', { class: 'photo-buttons' }, button, galleryButton), cameraInput, input, streamBox, panel);
-  return { el, reset };
+  el.append(modeSeg || '', cameraInput, input, streamBox, panel);
+  const buttons = h('div', { class: 'photo-buttons' }, button, galleryButton);
+  return { el, buttons, reset };
 }
 
 /** Camera mode on this device: 'photo' or 'stream' (remembered per browser). */
