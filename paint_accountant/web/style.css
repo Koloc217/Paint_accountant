@@ -733,3 +733,11 @@ main:has(.action-bar) { padding-bottom: 12px; }
 .action-bar .btn { white-space: nowrap; }
 .action-bar { flex-wrap: nowrap; }
 .action-bar > * { min-width: 0; }
+
+/* keyboard open (little height left): the top bar scrolls away, the bottom bar gets thinner */
+@media (max-height: 520px) {
+  .topbar { position: static; }
+  .action-bar { padding-block: 4px calc(4px + env(safe-area-inset-bottom)); }
+  .action-bar .btn, .action-bar .photo-btn { min-height: 38px; padding-block: 6px; }
+}
+html { scroll-padding-top: 12px; scroll-padding-bottom: 72px; }
