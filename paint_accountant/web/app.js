@@ -1385,118 +1385,180 @@ async function viewStorage(mount, id) {
 
 // ======================= catalogs: manufacturers and tags =======================
 
+let catalogSection = 'makers';
+
 async function viewCatalogs(mount) {
   const [makers, tags] = await Promise.all([api('GET', '/manufacturers'), api('GET', '/tags')]);
-  mount(h('div', null,
-    pageHead('Справочники'),
-    h('h2', { id: 'makers' }, 'Производители'),
-    manufacturersSection(makers),
-    h('h2', { id: 'tags' }, 'Теги'),
-    tagsSection(tags)));
+  const body = h('div', { class: 'card-list' });
+  const draw = () => body.replaceChildren(...(catalogSection === 'makers' ? manufacturersSection(makers) : tagsSection(tags)));
+  const seg = h('div', { class: 'seg catalog-seg', role: 'group', 'aria-label': 'Раздел' },
+    [['makers', `Производители (${makers.length})`], ['tags', `Теги (${tags.length})`]].map(([value, label]) => {
+      const b = h('button', { type: 'button', 'data-section': value, 'aria-pressed': String(value === catalogSection) }, label);
+      b.addEventListener('click', () => {
+        catalogSection = value;
+        seg.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+        draw();
+      });
+      return b;
+    }));
+  draw();
+  mount(h('div', null, pageHead('Справочники'), seg, body));
+}
+
+/** Name shown as text; ✎ turns it into a field with ✓ / ✕ (Enter saves, Esc cancels). */
+function editableName(item, { save, label, maxlength }) {
+  const box = h('div', { class: 'cat-name' });
+  const show = () => box.replaceChildren(h('span', { class: 'cat-title' }, item.name));
+  const edit = () => {
+    const input = h('input', { class: 'input', value: item.name, maxlength, 'aria-label': label });
+    const done = async ok => {
+      const v = input.value.trim();
+      if (!ok || !v || v === item.name) { show(); return; }
+      try {
+        Object.assign(item, await save(v));
+        toast('Сохранено', 'ok');
+      } catch (err) {
+        toast(explain(err, 'Такое название уже есть'), 'err');
+      }
+      show();
+    };
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); done(true); }
+      if (e.key === 'Escape') { e.preventDefault(); done(false); }
+    });
+    box.replaceChildren(input,
+      h('button', { type: 'button', class: 'icon-btn ok', title: 'Сохранить', 'aria-label': 'Сохранить', onclick: () => done(true) }, '✓'),
+      h('button', { type: 'button', class: 'icon-btn', title: 'Отмена', 'aria-label': 'Отмена', onclick: () => done(false) }, '✕'));
+    input.focus();
+    input.select();
+  };
+  show();
+  return { el: box, edit };
+}
+
+/** Icon button that asks for confirmation before deleting. */
+function deleteIcon(question, onConfirm) {
+  const b = h('button', { type: 'button', class: 'icon-btn danger-icon', title: 'Удалить', 'aria-label': 'Удалить' }, '🗑');
+  b.addEventListener('click', async e => {
+    e.preventDefault();
+    if (await confirmDialog(question)) onConfirm();
+  });
+  return b;
+}
+
+/** Open the paint list filtered by a manufacturer or a tag. */
+function showPaintsOf(kind, id) {
+  resetListFilters();
+  if (kind === 'maker') filters.maker = String(id);
+  else filters.tags.add(id);
+  location.hash = '#/';
+}
+
+function addRow(placeholder, onAdd, extra = null) {
+  const input = h('input', { class: 'input grow', placeholder, maxlength: 100, required: true });
+  const form = h('form', { class: 'cat-add' }, extra, input, h('button', { type: 'submit', class: 'btn primary' }, 'Добавить'));
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    if (await onAdd(input.value.trim())) render();
+  });
+  return form;
+}
+
+function catRow({ lead, name, sub, count, onOpen, actions }) {
+  // the whole middle of the row opens the paint list; the name gets the full width
+  const info = h('div', { class: 'grow cat-info', role: 'link', tabindex: 0, title: 'Показать краски' },
+    name.el,
+    h('div', { class: 'keywords' },
+      h('span', { class: count ? 'cat-count' : '' }, count ? countPaints(count) : 'нет красок'),
+      sub ? ` · ${sub}` : ''));
+  const open = e => {
+    if (e.target.closest('input, button')) return; // renaming in progress
+    onOpen();
+  };
+  info.addEventListener('click', open);
+  info.addEventListener('keydown', e => { if (e.key === 'Enter') open(e); });
+  return h('div', { class: 'cat-row' }, lead, info, h('span', { class: 'chev' }, '›'), actions);
 }
 
 function manufacturersSection(makers) {
-  const rows = makers.map(m => {
-    const nameInput = h('input', { class: 'input', value: m.name, maxlength: 100, 'aria-label': 'Название производителя' });
-    nameInput.addEventListener('change', async () => {
-      const v = nameInput.value.trim();
-      if (!v || v === m.name) { nameInput.value = m.name; return; }
-      try {
-        Object.assign(m, await api('PATCH', `/manufacturers/${m.id}`, { name: v }));
-        nameInput.value = m.name;
-        toast('Сохранено', 'ok');
-      } catch (err) {
-        nameInput.value = m.name;
-        toast(explain(err, 'Производитель с таким названием уже есть'), 'err');
-      }
-    });
-    const count = m.paint_count
-      ? h('a', { href: '#/', class: 'muted small', onclick: () => { resetListFilters(); filters.maker = String(m.id); } }, countPaints(m.paint_count))
-      : h('span', { class: 'muted small' }, 'нет красок');
-    return h('div', { class: 'tag-row' },
-      h('div', { class: 'grow' }, nameInput, h('div', { class: 'keywords' }, count)),
-      deleteButton('Удалить', () => ({ title: `Удалить производителя «${m.name}»?` }), async () => {
-        try {
-          await api('DELETE', `/manufacturers/${m.id}`);
-          toast('Производитель удалён', 'ok');
-          render();
-        } catch (err) {
-          toast(explain(err, 'Нельзя удалить: у производителя есть краски. Сначала перенесите или удалите их.'), 'err');
-        }
-      }));
-  });
-
-  const newName = h('input', { class: 'input grow', placeholder: 'Новый производитель', maxlength: 100, required: true });
-  const addForm = h('form', { class: 'panel row' }, newName, h('button', { type: 'submit', class: 'btn primary' }, 'Добавить'));
-  addForm.addEventListener('submit', async e => {
-    e.preventDefault();
+  const add = addRow('Новый производитель', async name => {
     try {
-      await api('POST', '/manufacturers', { name: newName.value.trim() });
+      await api('POST', '/manufacturers', { name });
       toast('Производитель добавлен', 'ok');
-      render();
+      return true;
     } catch (err) {
       toast(explain(err, 'Такой производитель уже есть'), 'err');
+      return false;
     }
   });
-
-  return h('div', { class: 'card-list' }, addForm, rows);
+  const rows = makers.map(m => {
+    const name = editableName(m, {
+      label: 'Название производителя', maxlength: 100,
+      save: v => api('PATCH', `/manufacturers/${m.id}`, { name: v }),
+    });
+    return catRow({
+      name,
+      count: m.paint_count,
+      onOpen: () => showPaintsOf('maker', m.id),
+      actions: h('div', { class: 'cat-actions' },
+        h('button', { type: 'button', class: 'icon-btn', title: 'Переименовать', 'aria-label': 'Переименовать', onclick: name.edit }, '✎'),
+        m.paint_count ? null : deleteIcon({ title: `Удалить производителя «${m.name}»?` }, async () => {
+          try {
+            await api('DELETE', `/manufacturers/${m.id}`);
+            toast('Производитель удалён', 'ok');
+            render();
+          } catch (err) { toast(explain(err, 'Нельзя удалить: у производителя есть краски'), 'err'); }
+        })),
+    });
+  });
+  return [add, ...rows];
 }
 
 function tagsSection(tags) {
-
-  const rows = tags.map(t => {
-    const nameInput = h('input', { class: 'input', value: t.name, maxlength: 50, 'aria-label': 'Название тега' });
-    const color = h('input', { type: 'color', class: 'color-picker', value: t.color, 'aria-label': 'Цвет тега' });
-
-    async function save(changes) {
-      try {
-        const updated = await api('PATCH', `/tags/${t.id}`, changes);
-        Object.assign(t, updated);
-        toast('Сохранено', 'ok');
-      } catch (err) {
-        nameInput.value = t.name;
-        color.value = t.color;
-        toast(explain(err, 'Тег с таким названием уже есть'), 'err');
-      }
-    }
-    nameInput.addEventListener('change', () => {
-      const v = nameInput.value.trim();
-      if (!v) { nameInput.value = t.name; return; }
-      if (v !== t.name) save({ name: v });
-    });
-    color.addEventListener('change', () => { if (color.value !== t.color) save({ color: color.value }); });
-
-    return h('div', { class: 'tag-row' },
-      color,
-      h('div', { class: 'grow' }, nameInput,
-        t.keywords.length ? h('div', { class: 'keywords' }, 'На этикетке: ' + t.keywords.join(', ')) : null),
-      deleteButton('Удалить', () => ({ title: `Удалить тег «${t.name}»?`, text: 'Он снимется со всех красок.' }), async () => {
-        try {
-          await api('DELETE', `/tags/${t.id}`);
-          toast('Тег удалён', 'ok');
-          render();
-        } catch (err) { toast(explain(err), 'err'); }
-      }));
-  });
-
-  const newName = h('input', { class: 'input grow', placeholder: 'Новый тег', maxlength: 50, required: true });
-  const newColor = h('input', { type: 'color', class: 'color-picker', value: '#888888', 'aria-label': 'Цвет тега' });
-  const addForm = h('form', { class: 'panel row' }, newColor, newName, h('button', { type: 'submit', class: 'btn primary' }, 'Добавить'));
-  addForm.addEventListener('submit', async e => {
-    e.preventDefault();
+  const newColor = h('input', { type: 'color', class: 'color-dot', value: '#888888', 'aria-label': 'Цвет тега', title: 'Цвет' });
+  const add = addRow('Новый тег', async name => {
     try {
-      await api('POST', '/tags', { name: newName.value.trim(), color: newColor.value });
+      await api('POST', '/tags', { name, color: newColor.value });
       toast('Тег добавлен', 'ok');
-      render();
+      return true;
     } catch (err) {
       toast(explain(err, 'Тег с таким названием уже есть'), 'err');
+      return false;
     }
+  }, newColor);
+  const rows = tags.map(t => {
+    const color = h('input', { type: 'color', class: 'color-dot', value: t.color, 'aria-label': `Цвет тега ${t.name}`, title: 'Сменить цвет' });
+    color.addEventListener('change', async () => {
+      try {
+        Object.assign(t, await api('PATCH', `/tags/${t.id}`, { color: color.value }));
+        toast('Цвет сохранён', 'ok');
+      } catch (err) {
+        color.value = t.color;
+        toast(explain(err), 'err');
+      }
+    });
+    const name = editableName(t, {
+      label: 'Название тега', maxlength: 50,
+      save: v => api('PATCH', `/tags/${t.id}`, { name: v }),
+    });
+    return catRow({
+      lead: color,
+      name,
+      sub: t.keywords.length ? 'на этикетке: ' + t.keywords.join(', ') : null,
+      count: t.paint_count,
+      onOpen: () => showPaintsOf('tag', t.id),
+      actions: h('div', { class: 'cat-actions' },
+        h('button', { type: 'button', class: 'icon-btn', title: 'Переименовать', 'aria-label': 'Переименовать', onclick: name.edit }, '✎'),
+        deleteIcon({ title: `Удалить тег «${t.name}»?`, text: t.paint_count ? `Он снимется с ${countPaints(t.paint_count)}.` : '' }, async () => {
+          try {
+            await api('DELETE', `/tags/${t.id}`);
+            toast('Тег удалён', 'ok');
+            render();
+          } catch (err) { toast(explain(err), 'err'); }
+        })),
+    });
   });
-
-  return h('div', { class: 'card-list' },
-    addForm,
-    h('p', { class: 'muted small', style: 'margin:0' }, 'Название и цвет сохраняются сразу после изменения. Удалённый тег снимается со всех красок.'),
-    rows);
+  return [add, ...rows];
 }
 
 // ======================= on-screen keyboard =======================

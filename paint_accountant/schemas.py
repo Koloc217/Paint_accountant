@@ -108,6 +108,7 @@ class Tag(BaseModel):
     name: str
     color: str
     keywords: list[str] = []
+    paint_count: int = 0
 
 
 # ---------- manufacturers ----------

@@ -752,3 +752,61 @@ html { scroll-padding-top: 12px; scroll-padding-bottom: 72px; }
   padding-inline: max(16px, calc(50vw - 380px + 16px));
 }
 main:has(.action-bar) { padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
+
+/* ---------- catalogs ---------- */
+
+.catalog-seg { margin-bottom: 12px; }
+.cat-add { display: flex; gap: 8px; align-items: center; }
+.cat-add .input { min-width: 0; }
+.cat-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 8px 8px 8px 12px;
+  min-height: 56px;
+}
+.cat-row .grow { flex: 1; min-width: 0; }
+.cat-name { display: flex; align-items: center; gap: 6px; }
+.cat-name .input { min-height: 40px; padding: 6px 10px; flex: 1; min-width: 0; }
+.cat-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cat-row .keywords { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cat-open {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 8px 4px;
+  min-height: 40px;
+}
+.cat-open .chev { font-size: 20px; line-height: 1; }
+.cat-actions { display: flex; gap: 4px; flex: none; }
+.cat-actions .icon-btn, .cat-name .icon-btn { width: 40px; height: 40px; }
+.icon-btn.ok { color: var(--ok); }
+.icon-btn.danger-icon { color: var(--danger); }
+.color-dot {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--line);
+  background: none;
+  cursor: pointer;
+  overflow: hidden;
+}
+.color-dot::-webkit-color-swatch-wrapper { padding: 0; }
+.color-dot::-webkit-color-swatch { border: 0; border-radius: 50%; }
+.color-dot::-moz-color-swatch { border: 0; border-radius: 50%; }
+.cat-info { cursor: pointer; padding-block: 2px; }
+.cat-info .cat-count { color: var(--accent); font-weight: 600; }
+.cat-row > .chev { color: var(--muted); font-size: 20px; flex: none; padding-right: 2px; }
+@media (hover: hover) { .cat-info:hover .cat-title { color: var(--accent); } }

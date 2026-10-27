@@ -172,7 +172,11 @@ def delete_storage(conn: sqlite3.Connection, storage_id: int) -> None:
 # ======================= tags =======================
 
 def list_tags(conn: sqlite3.Connection) -> list[dict]:
-    tags = [dict(r) for r in conn.execute("SELECT id, name, color FROM tag ORDER BY id")]
+    tags = [dict(r) for r in conn.execute(
+        """SELECT t.id, t.name, t.color, count(pt.paint_id) AS paint_count
+           FROM tag t LEFT JOIN paint_tag pt ON pt.tag_id = t.id
+           GROUP BY t.id ORDER BY t.id"""
+    )]
     keywords: dict[int, list[str]] = {}
     for r in conn.execute("SELECT tag_id, keyword FROM tag_keyword ORDER BY keyword"):
         keywords.setdefault(r["tag_id"], []).append(r["keyword"])
