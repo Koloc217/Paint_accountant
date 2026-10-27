@@ -1,19 +1,22 @@
 /* Interface language. Russian text is the key; EN holds the English version.
- * The language is chosen per device (Settings), by default from the browser. */
+ * The language is set in config.ini ([ui] language, also from Settings) for every device;
+ * the server puts it into <html data-lang>. "auto" means the browser's language. */
 'use strict';
 
 const LANGS = [['ru', 'Русский'], ['en', 'English']];
 
-const LANG = (() => {
-  try {
-    const saved = localStorage.getItem('pa.lang');
-    if (LANGS.some(([code]) => code === saved)) return saved;
-  } catch { /* private mode */ }
-  return (navigator.language || 'ru').toLowerCase().startsWith('ru') ? 'ru' : 'en';
-})();
+const LANG_SETTING = ['auto', ...LANGS.map(([code]) => code)].includes(document.documentElement.dataset.lang)
+  ? document.documentElement.dataset.lang : 'auto';
 
-function setLang(code) {
-  try { localStorage.setItem('pa.lang', code); } catch { /* private mode */ }
+const LANG = LANG_SETTING !== 'auto' ? LANG_SETTING
+  : (navigator.language || 'ru').toLowerCase().startsWith('ru') ? 'ru' : 'en';
+
+/** Save the language into config.ini (for every device) and reload. */
+async function setLang(code) {
+  const res = await fetch('/api/settings/language', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ language: code }),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
   location.reload();
 }
 
@@ -275,6 +278,9 @@ const EN = {
   "Вход по паролю": "Password sign-in",
   "Пароль передаётся по сети без шифрования (http), поэтому не используйте пароль от важных аккаунтов. ": "The password travels over the network unencrypted (http), so don't reuse a password from important accounts. ",
   "Краски": "Paints",
+  "Как в браузере": "Browser's",
+  "Не получилось сохранить: {0}": "Couldn't save: {0}",
+  "Сохраняется в config.ini и действует на всех устройствах.": "Saved in config.ini, applies to every device.",
   "💾 Сохранить картинку": "💾 Save image",
   "Не получилось сохранить картинку": "Couldn't save the image",
 };

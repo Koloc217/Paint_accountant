@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import os
 import sqlite3
 from typing import Iterator
 
@@ -13,7 +14,9 @@ from . import repository as repo
 from . import __version__, recognition
 from .db import connect
 from .netinfo import lan_url
+from .config import save_language
 from .schemas import (
+    LanguageIn,
     Manufacturer,
     ManufacturerIn,
     MoveIn,
@@ -74,8 +77,22 @@ def health(conn: sqlite3.Connection = Conn) -> dict:
 
 @router.get("/info", tags=["system"])
 def info(request: Request) -> dict:
-    """Version and the address other devices on the network can use (for NFC/QR links)."""
-    return {"version": __version__, "lan_url": lan_url(request.app.state.settings.port)}
+    """Version, the address other devices on the network can use (for NFC/QR links), interface language."""
+    return {"version": __version__, "lan_url": lan_url(request.app.state.settings.port),
+            "language": request.app.state.language}
+
+
+@router.put("/settings/language", tags=["system"])
+def set_language(body: LanguageIn, request: Request) -> dict:
+    """Interface language for every device; saved into config.ini ([ui] language)."""
+    settings = request.app.state.settings
+    try:
+        save_language(settings.config_file, body.language)
+    except OSError as exc:
+        raise HTTPException(500, f"can't write {settings.config_file}: {exc}")
+    request.app.state.language = body.language
+    return {"language": body.language, "config_file": str(settings.config_file),
+            "overridden_by_env": bool(os.environ.get("PAINT_LANGUAGE"))}
 
 
 @router.get("/qr.svg", tags=["system"], response_class=Response,

@@ -1743,15 +1743,20 @@ async function viewSettings(mount) {
   const [state, info] = await Promise.all([api('GET', '/auth'), api('GET', '/info').catch(() => ({}))]);
   const touch = window.matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
 
-  const device = h('div', { class: 'panel form' },
-    h('div', { class: 'field' }, h('span', { class: 'label' }, t('Язык')),
-      segButtons(t('Язык'), LANGS, LANG, code => { if (code !== LANG) setLang(code); })),
-    touch ? h('div', { class: 'field' }, h('span', { class: 'label' }, t('Камера при добавлении краски')),
+  const language = h('div', { class: 'panel form' },
+    h('div', { class: 'field' },
+      segButtons(t('Язык'), [['auto', t('Как в браузере')], ...LANGS], LANG_SETTING, async code => {
+        if (code === LANG_SETTING) return;
+        try { await setLang(code); } catch (err) { toast(t('Не получилось сохранить: {0}', err.message), 'err'); }
+      }),
+      h('div', { class: 'hint' }, t('Сохраняется в config.ini и действует на всех устройствах.'))));
+  const device = !touch ? null : h('div', { class: 'panel form' },
+    h('div', { class: 'field' }, h('span', { class: 'label' }, t('Камера при добавлении краски')),
       segButtons(t('Режим камеры'), [['photo', t('Фото')], ['stream', t('Поток + фото')]], cameraMode(), value => {
         cameraMode(value);
         render();
       }),
-      h('div', { class: 'hint' }, t('«Фото» открывает приложение камеры. «Поток» ловит штрихкоды в живом видео, но без HTTPS требует флаг Chrome.'))) : null);
+      h('div', { class: 'hint' }, t('«Фото» открывает приложение камеры. «Поток» ловит штрихкоды в живом видео, но без HTTPS требует флаг Chrome.'))));
 
   let signIn;
   if (!state.enabled) {
@@ -1797,7 +1802,8 @@ async function viewSettings(mount) {
 
   mount(h('div', null,
     pageHead(t('Настройки')),
-    h('h2', null, t('На этом устройстве')), device,
+    h('h2', null, t('Язык')), language,
+    device ? h('h2', null, t('На этом устройстве')) : null, device,
     h('h2', null, t('Вход по паролю')), signIn,
     h('p', { class: 'muted small' },
       t('Пароль передаётся по сети без шифрования (http), поэтому не используйте пароль от важных аккаунтов. '),

@@ -30,6 +30,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(title="Paint Accountant", version=__version__)
     app.state.settings = settings
+    app.state.language = settings.language  # changed from Settings at runtime
     app.include_router(router)
     app.include_router(auth_api.router)
     auth_api.install(app)
@@ -39,7 +40,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def index() -> HTMLResponse:
         html = (WEB_DIR / "index.html").read_text(encoding="utf-8")
         return HTMLResponse(
-            html.replace("__V__", _asset_version()),
+            html.replace("__V__", _asset_version()).replace("__LANG__", app.state.language),
             headers={"Cache-Control": "no-cache"},
         )
 

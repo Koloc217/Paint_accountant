@@ -21,7 +21,7 @@ pip install -r requirements.txt
 python run.py
 ```
 
-On start it prints the addresses to open — `http://localhost:8642/` on this computer and `http://<your-LAN-IP>:8642/` from a phone on the same network. The web UI is in Russian and English (picked from the browser language, switchable per device in ⚙ Settings) and works on phones and desktops, in light and dark mode. The REST API docs are at `/docs`.
+On start it prints the addresses to open — `http://localhost:8642/` on this computer and `http://<your-LAN-IP>:8642/` from a phone on the same network. The web UI is in Russian and English (the browser's language by default; set it for every device in ⚙ Settings or in `config.ini`) and works on phones and desktops, in light and dark mode. The REST API docs are at `/docs`.
 
 On Windows, allow Python through the firewall for **private networks** when asked, otherwise the phone won't reach the server. If `python` opens the Microsoft Store, use `py` instead, or turn off the `python.exe` alias in Settings → Apps → Advanced app settings → App execution aliases.
 
@@ -50,6 +50,7 @@ On first start `config.ini` is created from `config.example.ini`; edit it to cha
 |---|---|---|---|
 | `host` | `--host` | `PAINT_HOST` | `0.0.0.0` (reachable from other devices on your network) |
 | `port` | `--port` | `PAINT_PORT` | `8642` |
+| `language` (section `[ui]`) | — | `PAINT_LANGUAGE` | `auto` — the browser's language; `ru` or `en` for every device. ⚙ Settings writes it here |
 | `data_dir` | `--data-dir` | `PAINT_DATA_DIR` | `data` inside the app folder; relative paths are counted from the app folder, absolute ones (`/mnt/usb/paints`, `D:\Paints`) work too |
 
 ### Adding paints by photo (optional)
@@ -114,6 +115,7 @@ No build step and no external libraries — plain HTML, CSS and JavaScript in `p
 | PATCH / DELETE | `/api/tags/{id}` | |
 | GET | `/api/recognize` | whether photo recognition is installed |
 | POST | `/api/recognize` | send a photo as the body (`Content-Type: image/jpeg`); returns label text, barcodes, form suggestions and matching paints; `?barcode_only=true` skips text (for live camera frames) |
+| PUT | `/api/settings/language` | `{"language": "auto" \| "ru" \| "en"}` — saved into `config.ini` |
 | GET | `/api/qr.svg?data=…` | QR code as SVG (for storage labels) |
 | GET | `/api/auth` | whether sign-in is on and this device is signed in |
 | POST | `/api/auth/login` · `/api/auth/logout` | `{"password": "…"}`; sets / clears the session cookie |

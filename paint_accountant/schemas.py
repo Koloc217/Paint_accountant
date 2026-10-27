@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 import re
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -251,3 +253,7 @@ class PasswordIn(BaseModel):
 
 class NewPasswordIn(BaseModel):
     password: str = Field(..., min_length=4, max_length=200, description="at least 4 characters")
+
+
+class LanguageIn(BaseModel):
+    language: Literal["auto", "ru", "en"] = Field(..., description="auto = the browser's language")
