@@ -45,6 +45,40 @@ def _like_pattern(text: str) -> str:
     return f"%{escaped}%"
 
 
+def _paint_key(name: str) -> str:
+    return " ".join((name or "").lower().split())
+
+
+def _unique_counts(conn: sqlite3.Connection, sql: str, params: tuple = ()) -> dict[Any, int]:
+    """How many different paints each group has; `sql` yields (grp, manufacturer_id, name, code).
+
+    The same paint entered twice (same manufacturer and name) counts once. Same name with
+    different codes are different paints (Vallejo "Black" 70.950 and 72.051); an entry
+    without a code joins the others of that name.
+    """
+    codes: dict[Any, dict[tuple, set]] = {}
+    for grp, maker_id, name, code in conn.execute(sql, params):
+        per_name = codes.setdefault(grp, {}).setdefault((maker_id, _paint_key(name)), set())
+        code = _paint_key(code or "").replace(" ", "")
+        if code:
+            per_name.add(code)
+    return {grp: sum(max(1, len(c)) for c in names.values()) for grp, names in codes.items()}
+
+
+def _set_unique_counts(rows: list[dict], conn: sqlite3.Connection, sql: str) -> list[dict]:
+    counts = _unique_counts(conn, sql)
+    for r in rows:
+        r["paint_count"] = counts.get(r["id"], 0)
+    return rows
+
+
+_STORAGE_PAINTS = """SELECT l.storage_id, p.manufacturer_id, p.name, p.code
+                     FROM paint_location l JOIN paint p ON p.id = l.paint_id"""
+_MANUFACTURER_PAINTS = "SELECT manufacturer_id, manufacturer_id, name, code FROM paint"
+_TAG_PAINTS = """SELECT pt.tag_id, p.manufacturer_id, p.name, p.code
+                 FROM paint_tag pt JOIN paint p ON p.id = pt.paint_id"""
+
+
 # ======================= storages =======================
 
 _STORAGE_SELECT = """
@@ -76,14 +110,14 @@ def list_storages(conn: sqlite3.Connection, at_hand: bool | None = None) -> list
         sql += " WHERE s.at_hand = ?"
         params.append(int(at_hand))
     sql += " GROUP BY s.id ORDER BY s.is_default DESC, s.at_hand DESC, py_lower(s.name)"
-    return [_storage_row(r) for r in conn.execute(sql, params)]
+    return _set_unique_counts([_storage_row(r) for r in conn.execute(sql, params)], conn, _STORAGE_PAINTS)
 
 
 def get_storage(conn: sqlite3.Connection, storage_id: int) -> dict:
     row = conn.execute(_STORAGE_SELECT + " WHERE s.id = ? GROUP BY s.id", (storage_id,)).fetchone()
     if row is None:
         raise NotFound(f"storage {storage_id} not found")
-    return _storage_row(row)
+    return _set_unique_counts([_storage_row(row)], conn, _STORAGE_PAINTS)[0]
 
 
 def default_storage_id(conn: sqlite3.Connection) -> int | None:
@@ -177,6 +211,7 @@ def list_tags(conn: sqlite3.Connection) -> list[dict]:
            FROM tag t LEFT JOIN paint_tag pt ON pt.tag_id = t.id
            GROUP BY t.id ORDER BY t.id"""
     )]
+    _set_unique_counts(tags, conn, _TAG_PAINTS)
     keywords: dict[int, list[str]] = {}
     for r in conn.execute("SELECT tag_id, keyword FROM tag_keyword ORDER BY keyword"):
         keywords.setdefault(r["tag_id"], []).append(r["keyword"])
@@ -247,14 +282,14 @@ def list_manufacturers(conn: sqlite3.Connection, q: str | None = None) -> list[d
         sql += " WHERE py_lower(m.name) LIKE ? ESCAPE '\\'"
         params.append(_like_pattern(q.strip()))
     sql += " GROUP BY m.id ORDER BY py_lower(m.name)"
-    return [dict(r) for r in conn.execute(sql, params)]
+    return _set_unique_counts([dict(r) for r in conn.execute(sql, params)], conn, _MANUFACTURER_PAINTS)
 
 
 def get_manufacturer(conn: sqlite3.Connection, manufacturer_id: int) -> dict:
     row = conn.execute(_MANUFACTURER_SELECT + " WHERE m.id = ? GROUP BY m.id", (manufacturer_id,)).fetchone()
     if row is None:
         raise NotFound(f"manufacturer {manufacturer_id} not found")
-    return dict(row)
+    return _set_unique_counts([dict(row)], conn, _MANUFACTURER_PAINTS)[0]
 
 
 def _find_manufacturer(conn: sqlite3.Connection, name: str, exclude_id: int | None = None) -> int | None:
