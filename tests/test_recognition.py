@@ -264,6 +264,8 @@ def test_thinner_label_suggests_technical_tag(client, conn):
         ("Dipping Ink", "Чернила"),
         ("Quickshade Dip", "Чернила"),
         ("Inks", "Чернила"),
+        ("Weathering Pigments", "Спецэффект"),
+        ("Rust Pigment", "Спецэффект"),
     ],
 )
 def test_label_words_suggest_tags(client, conn, label, tag):
