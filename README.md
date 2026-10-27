@@ -37,7 +37,10 @@ Paint_accountant/
     └── photos/          uploaded pictures
 ```
 
-Back up or move your catalog by copying the `data/` folder. To move the whole app, copy the folder (and recreate `.venv` on the new machine).
+Back up or move your catalog by copying the `data/` folder.
+
+To change a storage's number in its link (`/#/storage/2` → `/#/storage/1`, e.g. to match an NFC tag you already wrote), stop the app and run `python tools/storage_id.py` to list storages, then `python tools/storage_id.py 2 1`. If the number is taken, the two storages swap; pots and settings follow. A copy of the database is saved first.
+ To move the whole app, copy the folder (and recreate `.venv` on the new machine).
 
 ### Settings
 
