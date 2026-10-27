@@ -741,3 +741,14 @@ main:has(.action-bar) { padding-bottom: 12px; }
   .action-bar .btn, .action-bar .photo-btn { min-height: 38px; padding-block: 6px; }
 }
 html { scroll-padding-top: 12px; scroll-padding-bottom: 72px; }
+
+/* the bar is pinned to the bottom of the screen, also when the form is shorter than the screen */
+.action-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  margin: 0;
+  padding-inline: max(16px, calc(50vw - 380px + 16px));
+}
+main:has(.action-bar) { padding-bottom: calc(76px + env(safe-area-inset-bottom)); }

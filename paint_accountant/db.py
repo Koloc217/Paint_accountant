@@ -154,6 +154,15 @@ MIGRATIONS: list[str] = [
     CREATE INDEX paint_manufacturer_ix ON paint (manufacturer_id);
     CREATE UNIQUE INDEX paint_barcode_uq ON paint (barcode) WHERE barcode IS NOT NULL;
     """,
+    # 5 — tag "Техническая": thinners, mediums, retarders and the like
+    """
+    INSERT INTO tag (name, color)
+        SELECT 'Техническая', '#607d8b'
+        WHERE NOT EXISTS (SELECT 1 FROM tag WHERE py_lower(name) = 'техническая');
+    INSERT OR IGNORE INTO tag_keyword (keyword, tag_id)
+        SELECT column1, (SELECT id FROM tag WHERE py_lower(name) = 'техническая')
+        FROM (VALUES ('medium'), ('thinner'), ('thinners'), ('retarder'), ('flow'), ('improver'), ('diluent'));
+    """,
 ]
 
 # Starter tags: (name, plaque color, label keywords)

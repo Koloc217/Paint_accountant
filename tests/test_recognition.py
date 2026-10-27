@@ -248,3 +248,8 @@ def test_find_paint_by_barcode_in_list(client):
     found = client.get("/api/paints", params={"barcode": "5011921027835"}).json()
     assert [x["id"] for x in found] == [p["id"]]
     assert client.get("/api/paints", params={"barcode": "000"}).json() == []
+
+
+def test_thinner_label_suggests_technical_tag(client, conn):
+    r = suggest(conn, _reading(("Vallejo", 20), ("Airbrush Thinner", 50), ("71.161", 20)))
+    assert _tag_id(client, "Техническая") in r["suggestion"]["tag_ids"]

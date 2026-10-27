@@ -113,7 +113,7 @@ Full details at `/docs` on a running server.
 - **"At hand" storage** — mark a drawer or organizer on your desk as within reach, and filter by what you can grab right now.
 - **Add paints by photo, not by typing** — barcode scan first, then local OCR of the label with fuzzy matching against paints you already have. Everything runs locally, no cloud AI APIs.
 - **Brand-agnostic** — no built-in brand list is required. The catalog grows from what you add yourself; external paint datasets can be imported as optional hints.
-- **Tags** — primer, base, layer, contrast, shade/wash, technical, metallic, ink, varnish, airbrush; editable and extendable.
+- **Tags** — primer, base, layer, contrast, shade/wash, effects, metallic, ink, varnish, airbrush, technical (thinners, mediums, retarders); editable and extendable.
 
 ## Planned stack
 

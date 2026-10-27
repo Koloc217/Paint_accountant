@@ -139,7 +139,7 @@ def test_reopen_keeps_data(tmp_path):
         _paint(c)
     with TestClient(create_app(settings)) as c:
         assert len(c.get("/api/paints").json()) == 1
-        assert len(c.get("/api/tags").json()) == 10  # starter tags not duplicated
+        assert len(c.get("/api/tags").json()) == 11  # starter tags not duplicated
 
 
 def test_starter_manufacturers(client):

@@ -104,3 +104,31 @@ def test_fresh_database_has_default_at_hand_storage(tmp_path):
     conn = db.connect(path)
     assert [tuple(r) for r in conn.execute("SELECT name, at_hand, is_default FROM storage")] == [("Под рукой", 1, 1)]
     conn.close()
+
+
+def test_technical_tag_added_once_with_keywords(tmp_path):
+    path = tmp_path / "paints.sqlite3"
+    db.init_db(path)
+    db.init_db(path)
+    conn = db.connect(path)
+    rows = conn.execute("SELECT id FROM tag WHERE name = 'Техническая'").fetchall()
+    assert len(rows) == 1
+    kws = {r[0] for r in conn.execute("SELECT keyword FROM tag_keyword WHERE tag_id = ?", (rows[0][0],))}
+    assert {"medium", "thinner", "retarder"} <= kws
+    conn.close()
+
+
+def test_technical_tag_not_duplicated_if_user_made_one(tmp_path):
+    path = tmp_path / "paints.sqlite3"
+    conn = db.connect(path)
+    for n, script in enumerate(db.MIGRATIONS[:4], start=1):
+        conn.executescript(f"BEGIN; {script} PRAGMA user_version = {n}; COMMIT;")
+        if n == 1:
+            db._seed_tags(conn)
+    with conn:
+        conn.execute("INSERT INTO tag (name, color) VALUES ('техническая', '#123456')")
+    conn.close()
+    db.init_db(path)
+    conn = db.connect(path)
+    assert conn.execute("SELECT count(*) FROM tag WHERE lower(name) LIKE '%ическая'").fetchone()[0] == 1
+    conn.close()
