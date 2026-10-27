@@ -1085,13 +1085,26 @@ function photoRecognizer({ status, fill }) {
           });
           return b;
         }));
-      const chips = lines.map(l => h('button', {
-        type: 'button', class: 'chip plain line-chip', title: 'Вставить',
+      // Name: chips work as toggles — tapped pieces are joined in tap order ("FLAT" + "BLACK"),
+      // tapping a piece again takes it out. If the name was typed by hand, the next tap starts over.
+      // Code and manufacturer: a tap replaces the field.
+      let picked = [];
+      let builtName = null;
+      if (s.name && fill.name === s.name) { // the name came from the photo: show its pieces as picked
+        picked = lines.map((l, i) => (l.kind === 'name' ? i : -1)).filter(i => i >= 0);
+        builtName = s.name;
+      }
+      const markPicked = () => chips.forEach((c, i) => c.setAttribute('aria-pressed', String(picked.includes(i))));
+      const chips = lines.map((l, i) => h('button', {
+        type: 'button', class: 'chip plain line-chip',
         onclick: () => {
           const text = l.text;
-          // the tapped text replaces whatever is in the field
           if (target === 'name') {
-            fill.name = niceCase(text);
+            if (fill.name !== builtName) picked = [];
+            picked = picked.includes(i) ? picked.filter(x => x !== i) : [...picked, i];
+            builtName = picked.map(x => niceCase(lines[x].text)).join(' ');
+            fill.name = builtName;
+            markPicked();
           } else if (target === 'code') {
             fill.code = text;
           } else {
@@ -1102,9 +1115,12 @@ function photoRecognizer({ status, fill }) {
           }
         },
       }, l.text));
+      markPicked();
       parts.push(h('div', { class: 'photo-section' },
         h('b', null, 'Текст с этикетки'),
-        h('div', { class: 'muted small' }, 'Нажмите на кусок текста — он заменит содержимое выбранного поля'),
+        h('div', { class: 'muted small' },
+          'Название: нажимайте куски по порядку — они склеятся, повторное нажатие убирает кусок. ',
+          'Код и производитель: нажатие заменяет поле.'),
         seg,
         h('div', { class: 'tag-picker' }, chips)));
     } else {

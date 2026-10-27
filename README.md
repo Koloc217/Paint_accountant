@@ -55,7 +55,7 @@ On first start `config.ini` is created from `config.example.ini`; edit it to cha
 pip install -r requirements-photo.txt
 ```
 
-Restart the app — the console says `Photo recognition: on`, and the new-paint form gets **📷 Снять этикетку** (opens the phone camera directly) and **🖼 Галерея** buttons. Take a photo of the label: the app reads the text and the barcode, fills in name, manufacturer, code, barcode and tags, and shows paints already in your catalog that look the same, with a **+1 pot** button. Pieces of the label text can be tapped to put them into a field (replacing what is there).
+Restart the app — the console says `Photo recognition: on`, and the new-paint form gets **📷 Снять этикетку** (opens the phone camera directly) and **🖼 Галерея** buttons. Take a photo of the label: the app reads the text and the barcode, fills in name, manufacturer, code, barcode and tags, and shows paints already in your catalog that look the same, with a **+1 pot** button. Pieces of the label text can be tapped: for the name they work as toggles and join in tap order (tap again to take a piece out); for code and manufacturer a tap replaces the field.
 
 Everything runs locally on your machine: [RapidOCR](https://github.com/RapidAI/RapidOCR) (ONNX models ship inside the package, nothing is downloaded at runtime) and [zxing-cpp](https://github.com/zxing-cpp/zxing-cpp) for barcodes. Prebuilt packages exist for Windows, Linux x86_64 and ARM64 (Raspberry Pi), Python 3.10–3.14. The text model reads Latin letters and digits; Cyrillic isn't recognized.
 
