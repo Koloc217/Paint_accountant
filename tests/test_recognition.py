@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from paint_accountant import recognition
 from paint_accountant.app import create_app
 from paint_accountant.config import load_settings
-from paint_accountant.recognition import Line, Reading, find_code, suggest
+from paint_accountant.recognition import Line, Reading, clean_name, find_code, suggest
 
 pytest.importorskip("rapidfuzz")
 
@@ -425,3 +425,47 @@ def test_one_common_word_of_unknown_brand_is_only_a_hint(client, conn):
 def test_storage_qr_in_the_frame_is_not_a_barcode(conn):
     r = suggest(conn, _with_barcode([("NULN OIL", 100, 60)], {"text": "http://192.168.1.94:8642/storage/2", "format": "QRCode"}))
     assert r["suggestion"]["barcode"] is None and r["barcodes"] == []
+
+
+# Tamiya Panel Line Accent Color, as RapidOCR read a real photo: the bold title loses its
+# spaces, the brand is only the star logo, the number is printed as "Item 87131".
+TAMIYA_PANEL_LINE = [
+    ("PANELLINE", 140, 395, 78), ("ACCENTCOLOR", 132, 480, 80), ("(BLACK)", 290, 565, 41),
+    ("DANGER: EXTREMELY FLAMMABLE LIQUID AND VAPOR", 150, 610, 22),
+    ("Read carefully additional warings on sach side panal.", 170, 640, 17),
+    ("Net 40ml Item 87131", 260, 665, 20),
+]
+
+
+def test_tamiya_by_item_number_with_glued_title(conn):
+    s = suggest(conn, _real(TAMIYA_PANEL_LINE))["suggestion"]
+    assert s["manufacturer"]["name"] == "Tamiya"
+    assert s["code"] == "87131"
+    assert s["name"] == "Panel Line Accent Color (Black)"
+    wash = conn.execute("SELECT id FROM tag WHERE name = 'Проливка'").fetchone()[0]
+    assert wash in s["tag_ids"]
+
+
+def test_tamiya_title_read_with_spaces(conn):
+    lines = [("PANEL LINE", 140, 395, 78), ("ACCENT COLOR", 132, 480, 80), ("(BLACK)", 290, 565, 41),
+             ("Net 40ml Item 87131", 260, 665, 20)]
+    assert suggest(conn, _real(lines))["suggestion"]["name"] == "Panel Line Accent Color (Black)"
+
+
+@pytest.mark.parametrize("read, expected", [
+    ('NULN OIL"', "Nuln Oil"),          # ™ read as a quote
+    ("Nuln Oil™", "Nuln Oil"),
+    ("AGRAX EARTHSHADE TM", "Agrax Earthshade"),
+    ("MEPHISTON RED'", "Mephiston Red"),
+    ("Ork's Flesh", "Ork's Flesh"),     # an apostrophe inside a word stays
+    ("NIGHTSHADE", "Nightshade"),       # a real one-word name is not split
+    ("REVITALIZER", "Revitalizer"),
+])
+def test_clean_name(read, expected):
+    assert clean_name(read) == expected
+
+
+def test_citadel_trademark_quote_is_dropped(conn):
+    r = suggest(conn, _real([("CITADEL", 100, 40, 30), ('NULN OIL"', 60, 120, 70)]))
+    assert r["suggestion"]["manufacturer"]["name"] == "Citadel"
+    assert r["suggestion"]["name"] == "Nuln Oil"

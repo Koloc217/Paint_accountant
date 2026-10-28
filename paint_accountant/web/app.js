@@ -821,7 +821,8 @@ async function viewPaintForm(mount, id, prefillStorage = null) {
           // keep manufacturer, storage and tags — usually the next pot is from the same batch
           name.value = ''; code.value = ''; barcode.value = ''; hexText.value = ''; setSwatch(preview, null); qty.value = '1';
           if (photoBlock) photoBlock.reset();
-          name.focus();
+          // the next pot goes straight to the camera; otherwise (computer) to the name field
+          if (!(photoBlock && photoBlock.startCamera())) name.focus();
           return;
         }
       } else {
@@ -905,7 +906,7 @@ function photoRecognizer({ status, fill }) {
       t('Распознавание по фото не установлено. На компьютере с приложением выполните '),
       h('code', null, (status && status.install) || 'pip install -r requirements-photo.txt'),
       t(' и перезапустите его.')));
-    return { el, buttons: '', reset() {} };
+    return { el, buttons: '', reset() {}, startCamera: () => false };
   }
 
   // Phones: "photo" mode — capture="environment" opens the rear camera app straight away (works over
@@ -1246,9 +1247,24 @@ function photoRecognizer({ status, fill }) {
         h('a', { class: 'btn small-btn', href: `#/paint/${p.id}` }, t('Открыть'))));
   }
 
+  /** Open the camera without a tap of its own — after "+ ещё". False when there's no camera here. */
+  function startCamera() {
+    if (!touch) return false;
+    if (mode === 'stream') { startStream(); return true; }
+    // the camera app opens only right after a tap; saving takes a moment, and if the tap has
+    // "expired" by then (a slow server, a duplicate question) the browser would silently ignore it
+    if (navigator.userActivation && !navigator.userActivation.isActive) {
+      button.focus({ preventScroll: true });
+      button.scrollIntoView({ block: 'nearest' });
+      return true;
+    }
+    cameraInput.click();
+    return true;
+  }
+
   el.append(modeSeg || '', cameraInput, input, streamBox, panel);
   const buttons = h('div', { class: 'photo-buttons' }, button, galleryButton);
-  return { el, buttons, reset };
+  return { el, buttons, reset, startCamera };
 }
 
 /** Camera mode on this device: 'photo' or 'stream' (remembered per browser). */

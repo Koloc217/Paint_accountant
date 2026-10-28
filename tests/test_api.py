@@ -28,7 +28,7 @@ def test_health_and_starter_tags(client):
     names = [t["name"] for t in tags]
     assert "Проливка" in names and "Контраст" in names
     wash = next(t for t in tags if t["name"] == "Проливка")
-    assert set(wash["keywords"]) == {"shade", "wash"}
+    assert set(wash["keywords"]) == {"shade", "wash", "accent"}
 
 
 def test_docs_still_available(client):

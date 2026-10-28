@@ -247,6 +247,13 @@ MIGRATIONS: list[str] = [
         value TEXT NOT NULL
     );
     """,
+    # 13 — Tamiya "Panel Line Accent Color" is a wash -> "Проливка"
+    """
+    INSERT OR IGNORE INTO tag_keyword (keyword, tag_id)
+        SELECT v.column1, t.id
+        FROM (VALUES ('accent')) v
+        JOIN tag t ON py_lower(t.name) = 'проливка';
+    """,
 ]
 
 # Starter tags: (name, plaque color, label keywords)
@@ -255,7 +262,7 @@ STARTER_TAGS: list[tuple[str, str, list[str]]] = [
     ("Основа", "#5c6bc0", ["base"]),
     ("Слой", "#42a5f5", ["layer"]),
     ("Контраст", "#ab47bc", ["contrast", "speedpaint"]),
-    ("Проливка", "#8d6e63", ["shade", "wash"]),
+    ("Проливка", "#8d6e63", ["shade", "wash", "accent"]),
     ("Спецэффект", "#26a69a", ["technical", "effect"]),
     ("Металлик", "#bdbdbd", ["metal", "metallic"]),
     ("Чернила", "#3949ab", ["ink"]),

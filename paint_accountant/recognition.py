@@ -222,6 +222,8 @@ CODE_PATTERNS: list[tuple[str | None, re.Pattern, Any]] = [
     ("AK", re.compile(r"\bAK\s?-?\s?(\d{3,5})\b", re.I), lambda m: f"AK{m[1]}"),
     ("Army Painter", re.compile(r"\b(WP|CP|GM)\s?(\d{4})\b", re.I), lambda m: f"{m[1].upper()}{m[2]}"),
     ("Tamiya", re.compile(r"\b(XF|X|LP|TS|AS)\s?-\s?(\d{1,3})\b", re.I), lambda m: f"{m[1].upper()}-{m[2]}"),
+    # Tamiya prints the catalogue number as "Item 87131" (also "Item No. 81731")
+    ("Tamiya", re.compile(r"\bItem\s?(?:No\.?\s?)?(\d{5})\b", re.I), lambda m: m[1]),
     ("Citadel", re.compile(r"\b(\d{2})\s?-\s?(\d{2})\b"), lambda m: f"{m[1]}-{m[2]}"),
     # Green Stuff World: "1750 - PAINT REVITALIZER"
     ("Green Stuff World", re.compile(r"\b(\d{4,5})\s*[-–]\s*[A-Za-z]"), lambda m: m[1]),
@@ -246,11 +248,60 @@ def find_code(text: str, manufacturer: str | None = None) -> str | None:
     return find_code_with_maker(text, manufacturer)[0]
 
 
+# Trademark marks after a name: "™", "®", and the way OCR reads them — a stray quote or "TM".
+TRADEMARK = re.compile(r"[™®©]|[\"'`´“”‘’]+(?=\s|$)|(?<=\s)TM(?=\s|$)")
+
+# Words printed on labels that OCR often glues together when the font is bold and tight
+# ("PANELLINE ACCENTCOLOR"). Kept short on purpose: a real one-word name ("Nightshade")
+# must not be split, so only plain label words and basic colours are here.
+GLUE_WORDS = {
+    "panel", "line", "accent", "color", "colour", "model", "game", "air", "metal", "metallic",
+    "black", "white", "red", "blue", "green", "yellow", "orange", "purple", "violet", "pink",
+    "brown", "grey", "gray", "gold", "silver", "bronze", "copper", "steel", "chrome", "khaki",
+    "olive", "flat", "matt", "matte", "gloss", "satin", "clear", "dark", "light", "deep", "pale",
+    "wash", "shade", "ink", "primer", "varnish", "thinner", "effect", "enamel", "acrylic",
+}
+
+
+def _unglue(word: str, vocab: set[str]) -> str:
+    """'PANELLINE' -> 'PANEL LINE' when the whole word splits into known label words."""
+    low = word.lower()
+    if len(low) < 7 or not low.isalpha() or low in vocab:
+        return word
+    best: list[list[int] | None] = [[]] + [None] * len(low)  # cut positions; fewest parts wins
+    for end in range(3, len(low) + 1):
+        for start in range(0, end - 2):
+            if best[start] is not None and low[start:end] in vocab:
+                cand = best[start] + [end]
+                if best[end] is None or len(cand) < len(best[end]):
+                    best[end] = cand
+    cuts = best[len(low)]
+    if not cuts or len(cuts) < 2:
+        return word
+    starts = [0] + cuts[:-1]
+    return " ".join(word[a:b] for a, b in zip(starts, cuts))
+
+
+def clean_name(text: str, vocab: set[str] = GLUE_WORDS) -> str:
+    """Drop trademark marks, split glued label words, then make the case readable."""
+    text = " ".join(TRADEMARK.sub(" ", text).split())
+    text = " ".join(_unglue(w, vocab) for w in text.split())
+    return _nice_name(text)
+
+
 def _nice_name(text: str) -> str:
     """'NULN OIL' -> 'Nuln Oil'; mixed case is kept as printed."""
     if text.isupper():
-        return " ".join(w.capitalize() if w.isalpha() else w for w in text.split())
+        return " ".join(_cap(w) for w in text.split())
     return text
+
+
+def _cap(word: str) -> str:
+    """'BLACK' -> 'Black', '(BLACK)' -> '(Black)'; codes like '70.951' stay as they are."""
+    core = word.strip("()[]")
+    if core.isalpha():
+        return word.replace(core, core.capitalize(), 1)
+    return word
 
 
 def _maker_score(text: str, key: str, by_alias: bool) -> float:
@@ -409,9 +460,18 @@ def suggest(conn: sqlite3.Connection, reading: Reading) -> dict[str, Any]:
                 name_parts.insert(0, ln)
             else:
                 break
+        # a variant in brackets printed smaller right under the name: "ACCENT COLOR" / "(BLACK)"
+        last = name_parts[-1]
+        below = [ln for ln in lines if ln.y > last.y and ln.kind in ("other", "filler", "tag")
+                 and re.fullmatch(r"\(\s*[A-Za-z][A-Za-z .'-]*\)", ln.text.strip())]
+        if below:
+            nxt = min(below, key=lambda ln: ln.y)
+            if nxt.y - (last.y + last.height) <= 0.9 * hh:
+                name_parts.append(nxt)
         for ln in name_parts:
             ln.kind = "name"
-    name = _nice_name(" ".join(ln.text for ln in name_parts)) if name_parts else None
+    vocab = GLUE_WORDS | {w for kw, _ in keywords for w in norm(kw).split() if len(w) >= 3}
+    name = clean_name(" ".join(ln.text for ln in name_parts), vocab) if name_parts else None
     if name and code:
         name = " ".join(name.replace(code, "").split()) or name
 
@@ -479,7 +539,7 @@ def suggest(conn: sqlite3.Connection, reading: Reading) -> dict[str, Any]:
             "manufacturer": {"id": maker["id"], "name": maker["name"]} if maker else None,
             "code": code,
             "barcode": next((b["text"] for b in barcodes if b["paint_id"] is None), None),
-            "tag_ids": _tag_ids(full_text, keywords),
+            "tag_ids": _tag_ids(f"{full_text} {name or ''}", keywords),  # the name with glued words split
         },
         "matches": best_matches,
     }
