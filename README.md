@@ -37,7 +37,18 @@ Paint_accountant/
     └── photos/          uploaded pictures
 ```
 
-Back up or move your catalog by copying the `data/` folder.
+### Backup and moving to another machine
+
+**⚙ Settings → Backup** has three buttons:
+
+- **⬇ Paint list (CSV)** — every paint sorted by manufacturer and name, with the color (hex) when set, pots, where they are, tags and barcode. UTF-8 with BOM; `;` as separator in Russian, `,` in English, so Excel opens it correctly in either locale. For reading only — it can't be imported back.
+- **⬇ Full backup (.zip)** — the whole database (paints, storages, tags, manufacturers, settings including the sign-in password) and the `photos/` folder, consistent even while the app is running.
+- **Restore from a backup…** — replaces the catalog with a `.zip` made here or on another machine. The current database is kept as `data/paints.before-restore-<date>.sqlite3`; a dump from an older app version is upgraded on the way in, one from a newer version is refused.
+
+The same from the console: `python run.py --dump [file.zip]` and `python run.py --restore file.zip`. Copying the `data/` folder while the app is stopped works too.
+
+Autostart (systemd on Linux / Raspberry Pi, Task Scheduler on Windows) and moving step by step: [docs/autostart.md](docs/autostart.md) (in Russian).
+
 
 To change a storage's number in its link (`/#/storage/2` → `/#/storage/1`, e.g. to match an NFC tag you already wrote), stop the app and run `python tools/storage_id.py` to list storages, then `python tools/storage_id.py 2 1`. If the number is taken, the two storages swap; pots and settings follow. A copy of the database is saved first.
  To move the whole app, copy the folder (and recreate `.venv` on the new machine).
@@ -156,7 +167,7 @@ Development and testing happen on a Raspberry Pi 5 (8 GB), but the Pi is not a r
 
 - Only dependencies with prebuilt wheels for Windows, Linux x86_64 and Linux ARM64
 - No hardcoded paths: data, database and photos go to a configurable folder, defaulting to the OS's standard per-user data directory
-- One command to run on any OS; autostart recipes (systemd, Windows Task Scheduler) are optional extras
+- One command to run on any OS; autostart recipes (systemd, Windows Task Scheduler) are optional extras — see [docs/autostart.md](docs/autostart.md)
 - Photo recognition is an optional module — the catalog works without it
 
 ## Roadmap

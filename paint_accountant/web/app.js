@@ -1747,6 +1747,49 @@ function passwordPair(onSubmit, buttonLabel) {
   return form;
 }
 
+function backupPanel() {
+  const fileInput = h('input', { type: 'file', accept: '.zip,.sqlite3,application/zip', hidden: true });
+  const restore = h('button', { type: 'button', class: 'btn danger' }, t('Восстановить из копии…'));
+  restore.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', async () => {
+    const file = fileInput.files && fileInput.files[0];
+    fileInput.value = '';
+    if (!file) return;
+    const ok = await confirmDialog({
+      title: t('Заменить каталог копией «{0}»?', file.name),
+      text: t('Все краски, хранилища, теги и настройки станут такими, как в копии. Текущая база сохранится рядом с ней в папке данных — её можно вернуть.'),
+      confirmLabel: t('Заменить'),
+    });
+    if (!ok) return;
+    restore.disabled = true;
+    try {
+      const res = await fetch('/api/backup/restore', { method: 'POST', headers: { 'Content-Type': 'application/zip' }, body: file });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        const d = data && data.detail;
+        throw new Error(typeof d === 'string' ? d : t('Ошибка {0}', res.status));
+      }
+      toast(t('Каталог восстановлен: {0} красок', data.counts.paint), 'ok');
+      setTimeout(() => { location.hash = '#/'; location.reload(); }, 900);
+    } catch (err) {
+      toast(t('Не получилось восстановить: {0}', err.message), 'err');
+    } finally {
+      restore.disabled = false;
+    }
+  });
+  return h('div', { class: 'panel form' },
+    h('div', { class: 'field' },
+      h('a', { class: 'btn', href: `/api/backup/paints.csv?lang=${LANG}`, download: '' }, t('⬇ Список красок (CSV)')),
+      h('div', { class: 'hint' }, t('По производителям, с цветом, если он задан. Открывается в Excel и Google Таблицах. Только для чтения — обратно не загружается.'))),
+    h('div', { class: 'field' },
+      h('a', { class: 'btn', href: '/api/backup/dump', download: '' }, t('⬇ Полная копия (.zip)')),
+      h('div', { class: 'hint' }, t('Вся база и фото — чтобы перенести каталог на другой компьютер или вернуть после сбоя. Пароль входа тоже внутри.'))),
+    h('div', { class: 'field' },
+      h('div', null, restore, fileInput),
+      h('div', { class: 'hint' }, t('Загрузите .zip, скачанный выше (здесь или на другом компьютере). Из консоли: '),
+        h('code', null, t('python run.py --restore копия.zip')))));
+}
+
 function segButtons(label, options, current, onPick) {
   return h('div', { class: 'seg', role: 'group', 'aria-label': label }, options.map(([value, text]) => {
     const b = h('button', { type: 'button', 'aria-pressed': String(value === current) }, text);
@@ -1819,6 +1862,7 @@ async function viewSettings(mount) {
   mount(h('div', null,
     pageHead(t('Настройки')),
     h('h2', null, t('Язык')), language,
+    h('h2', null, t('Резервная копия')), backupPanel(),
     device ? h('h2', null, t('На этом устройстве')) : null, device,
     h('h2', null, t('Вход по паролю')), signIn,
     h('p', { class: 'muted small' },

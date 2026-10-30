@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from starlette.concurrency import run_in_threadpool
 
 from . import repository as repo
-from . import __version__, recognition
+from . import __version__, backup, recognition
 from .db import connect
 from .netinfo import lan_url
 from .config import save_language
@@ -370,4 +370,45 @@ async def recognize(
     try:
         return await run_in_threadpool(work)
     except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
+# ---------------- backup ----------------
+
+def _download(data: bytes, filename: str, media_type: str) -> Response:
+    return Response(data, media_type=media_type, headers={
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        "Cache-Control": "no-store",
+    })
+
+
+@router.get("/backup/paints.csv", tags=["backup"], response_class=Response,
+            responses={200: {"content": {"text/csv": {}}}})
+def backup_csv(lang: str = Query("ru", pattern="^(ru|en)$", description="column names and separator"),
+               conn: sqlite3.Connection = Conn) -> Response:
+    """Every paint by manufacturer and name, with its color when set. For reading, not for import."""
+    return _download(backup.paints_csv(conn, lang), f"paints-{backup._today()}.csv", "text/csv; charset=utf-8")
+
+
+@router.get("/backup/dump", tags=["backup"], response_class=Response,
+            responses={200: {"content": {"application/zip": {}}}})
+async def backup_dump(request: Request) -> Response:
+    """The whole catalog (database + photos) as a .zip — to restore here or on another machine."""
+    data = await run_in_threadpool(backup.make_dump, request.app.state.settings)
+    return _download(data, backup.dump_filename(), "application/zip")
+
+
+@router.post("/backup/restore", tags=["backup"],
+             openapi_extra={"requestBody": {"content": {"application/zip": {}}, "required": True}})
+async def backup_restore(request: Request) -> dict:
+    """Replace the whole catalog with a dump sent as the request body. The current
+    database is copied aside first (paints.before-restore-….sqlite3 in the data folder)."""
+    data = await request.body()
+    if not data:
+        raise HTTPException(422, "send the dump file in the request body")
+    if len(data) > backup.MAX_DUMP_BYTES:
+        raise HTTPException(413, "the file is too large")
+    try:
+        return await run_in_threadpool(backup.restore_dump, request.app.state.settings, data)
+    except backup.BadDump as exc:
         raise HTTPException(422, str(exc))

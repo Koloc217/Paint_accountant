@@ -28,6 +28,19 @@ function t(text, ...args) {
 
 
 const EN = {
+  "python run.py --restore копия.zip": "python run.py --restore backup.zip",
+  "Резервная копия": "Backup",
+  "Восстановить из копии…": "Restore from a backup…",
+  "Заменить каталог копией «{0}»?": "Replace the catalog with «{0}»?",
+  "Все краски, хранилища, теги и настройки станут такими, как в копии. Текущая база сохранится рядом с ней в папке данных — её можно вернуть.": "All paints, storages, tags and settings will be as in the backup. The current database is kept next to it in the data folder, so it can be brought back.",
+  "Заменить": "Replace",
+  "Каталог восстановлен: {0} красок": "Catalog restored: {0} paints",
+  "Не получилось восстановить: {0}": "Couldn't restore: {0}",
+  "⬇ Список красок (CSV)": "⬇ Paint list (CSV)",
+  "По производителям, с цветом, если он задан. Открывается в Excel и Google Таблицах. Только для чтения — обратно не загружается.": "By manufacturer, with the color when set. Opens in Excel and Google Sheets. For reading only — it can't be loaded back.",
+  "⬇ Полная копия (.zip)": "⬇ Full backup (.zip)",
+  "Вся база и фото — чтобы перенести каталог на другой компьютер или вернуть после сбоя. Пароль входа тоже внутри.": "The whole database and photos — to move the catalog to another computer or bring it back after a failure. The sign-in password is inside too.",
+  "Загрузите .zip, скачанный выше (здесь или на другом компьютере). Из консоли: ": "Load a .zip downloaded above (here or on another computer). From the console: ",
   "Ошибка {0}": "Error {0}",
   "Нет связи с сервером": "Can't reach the server",
   "Не найдено — возможно, уже удалено": "Not found — maybe already deleted",

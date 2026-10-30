@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 import uvicorn
 
-from . import auth, recognition
+from . import auth, backup, recognition
 from .db import connect
 from .app import create_app
 from .netinfo import lan_ip
@@ -45,6 +46,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--config", help=f"settings file to use instead of {CONFIG_FILE.name}")
     parser.add_argument("--reset-auth", action="store_true",
                         help="forgot the password? turn sign-in off (set a new one in Settings) and exit")
+    parser.add_argument("--dump", nargs="?", const="", metavar="FILE",
+                        help="save the whole catalog to a .zip (default: paint-accountant-<date>.zip here) and exit")
+    parser.add_argument("--restore", metavar="FILE",
+                        help="replace the catalog with a dump made by --dump or in Settings, and exit "
+                             "(the current database is copied aside first)")
     args = parser.parse_args(argv)
 
     if args.config is None and ensure_config_file():
@@ -61,6 +67,22 @@ def main(argv: list[str] | None = None) -> None:
         finally:
             conn.close()
         print("Sign-in is off: the app opens without a password. Set a new one in Settings.")
+        return
+    if args.dump is not None:
+        target = Path(args.dump or backup.dump_filename())
+        if target.is_dir():
+            target = target / backup.dump_filename()
+        target.write_bytes(backup.make_dump(settings))
+        print(f"Saved the catalog to {target.resolve()}")
+        return
+    if args.restore:
+        try:
+            result = backup.restore_dump(settings, Path(args.restore).read_bytes())
+        except (OSError, backup.BadDump) as exc:
+            raise SystemExit(f"Can't restore: {exc}")
+        c = result["counts"]
+        print(f"Restored: {c['paint']} paints, {c['storage']} storages, {c['tag']} tags.")
+        print(f"The previous database is kept as {settings.data_dir / result['previous']}")
         return
     print(f"Paint Accountant: data in {settings.data_dir}")
     print("Open in a browser:")
