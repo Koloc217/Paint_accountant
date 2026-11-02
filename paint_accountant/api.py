@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from starlette.concurrency import run_in_threadpool
 
 from . import repository as repo
-from . import __version__, backup, recognition
+from . import __version__, backup, export, recognition
 from .db import connect
 from .netinfo import lan_url
 from .config import save_language
@@ -406,6 +406,33 @@ def backup_csv(lang: str = Query("ru", pattern="^(ru|en)$", description="column 
                conn: sqlite3.Connection = Conn) -> Response:
     """Every paint by manufacturer and name, with its color when set. For reading, not for import."""
     return _download(backup.paints_csv(conn, lang), f"paints-{backup._today()}.csv", "text/csv; charset=utf-8")
+
+
+@router.get("/export/paints.md", tags=["backup"], response_class=Response,
+            responses={200: {"content": {"text/markdown": {}}}})
+def export_markdown(
+    level: Literal["short", "full"] = Query(
+        "short", description="short: in-stock paints for a chatbot; full: storages, pots, barcodes, out of stock"),
+    lang: str = Query("ru", pattern="^(ru|en)$"),
+    download: bool = Query(False, description="true: as a file; false: plain text to show or copy"),
+    q: str | None = None,
+    manufacturer_id: int | None = None,
+    storage_id: int | None = None,
+    no_storage: bool = False,
+    tag_id: list[int] = Query([]),
+    at_hand: bool | None = None,
+    in_stock: bool | None = None,
+    conn: sqlite3.Connection = Conn,
+) -> Response:
+    """The paint list as Markdown, with the same filters as /paints."""
+    text = export.paints_markdown(
+        conn, level, lang, q=(q or "").strip() or None, manufacturer_id=manufacturer_id, storage_id=storage_id,
+        no_storage=no_storage, tag_ids=tag_id, at_hand=at_hand, in_stock=in_stock)
+    data = text.encode("utf-8")
+    media = "text/markdown; charset=utf-8"
+    if download:
+        return _download(data, f"paints-{level}-{backup._today()}.md", media)
+    return Response(data, media_type=media, headers={"Cache-Control": "no-store"})
 
 
 @router.get("/backup/dump", tags=["backup"], response_class=Response,

@@ -917,3 +917,9 @@ body.selecting .paint-list { padding-bottom: 150px; }
 .bulk-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .bulk-actions > select { flex: 1 1 140px; min-width: 0; }
 body.selecting #toast { bottom: calc(170px + env(safe-area-inset-bottom)); }
+
+/* export dialog */
+.export-levels { display: grid; gap: 10px; margin-top: 12px; }
+.export-level { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; }
+.export-level input { margin-top: 3px; flex: none; }
+.export-level:has(input:checked) { border-color: var(--accent); }
