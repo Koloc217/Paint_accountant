@@ -242,6 +242,21 @@ class MoveIn(BaseModel):
     count: int = Field(default=1, ge=1, le=100)
 
 
+class BulkIn(BaseModel):
+    paint_ids: list[int] = Field(..., min_length=1, max_length=1000)
+    action: Literal["move", "add_tags", "remove_tags"]
+    to_storage_id: int | None = Field(default=None, description="move: target storage, null = without storage")
+    from_storage_id: int | None = Field(
+        default=None, description="move: leave out to take pots from every storage; give an id (or null) to take only from there"
+    )
+    tag_ids: list[int] = Field(default_factory=list, max_length=100, description="add_tags / remove_tags")
+
+
+class BulkResult(BaseModel):
+    changed: int = Field(..., description="how many of the paints really changed")
+    paints: list[Paint]
+
+
 class PotsResult(BaseModel):
     paint: Paint
     notice: dict

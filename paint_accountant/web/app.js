@@ -160,11 +160,12 @@ function choiceDialog({ title, text = '', content = null, buttons }) {
     const dlg = h('dialog', { class: 'dialog', 'aria-labelledby': 'dlg-title' });
     const close = result => { dlg.close(); dlg.remove(); resolve(result); };
     const btns = buttons.map(b => h('button', { type: 'button', class: 'btn ' + (b.kind || ''), onclick: () => close(b.value) }, b.label));
-    dlg.append(
+    // DOM append() would print a missing part as the word "null", so leave it out
+    dlg.append(...[
       h('h3', { id: 'dlg-title' }, title),
       text ? h('p', { class: 'muted' }, text) : null,
       content,
-      h('div', { class: 'dialog-actions' }, btns));
+      h('div', { class: 'dialog-actions' }, btns)].filter(Boolean));
     dlg.addEventListener('cancel', e => { e.preventDefault(); close(null); }); // Esc / back gesture
     dlg.addEventListener('click', e => { if (e.target === dlg) close(null); }); // tap outside
     document.body.append(dlg);
@@ -174,10 +175,10 @@ function choiceDialog({ title, text = '', content = null, buttons }) {
 }
 
 /** Modal "are you sure?" window. Resolves true if the user confirms. */
-async function confirmDialog({ title, text = '', confirmLabel = t('Удалить') }) {
+async function confirmDialog({ title, text = '', confirmLabel = t('Удалить'), kind = 'danger-solid' }) {
   return (await choiceDialog({
     title, text,
-    buttons: [{ label: t('Отмена'), value: false }, { label: confirmLabel, value: true, kind: 'danger-solid' }],
+    buttons: [{ label: t('Отмена'), value: false }, { label: confirmLabel, value: true, kind }],
   })) === true;
 }
 
@@ -319,11 +320,12 @@ function watchPaint(id, fn) {
 }
 
 /** Paint rows with quick +/-. On a storage page (storageId) they count and change pots in that storage. */
-function paintList(paints, { storageId = null } = {}) {
-  return h('ul', { class: 'paint-list' }, paints.map(p => paintRow(p, storageId)));
+/** sel: { on, ids, onPick } — while on, tapping a row picks it instead of opening it. */
+function paintList(paints, { storageId = null, sel = null } = {}) {
+  return h('ul', { class: 'paint-list' }, paints.map(p => paintRow(p, storageId, sel)));
 }
 
-function paintRow(p, storageId) {
+function paintRow(p, storageId, sel = null) {
   const here = () => (storageId
     ? ((p.locations.find(l => l.storage && l.storage.id === storageId) || {}).quantity || 0)
     : p.quantity);
@@ -365,14 +367,31 @@ function paintRow(p, storageId) {
   watchPaint(p.id, draw);
   draw(p);
 
-  row.append(
-    h('a', { class: 'paint-link', href: `#/paint/${p.id}` },
+  const picking = Boolean(sel && sel.on);
+  const link = h('a', { class: 'paint-link', href: `#/paint/${p.id}` },
+      picking ? h('span', { class: 'pick-box', 'aria-hidden': 'true' }) : null,
       swatch(p.hex),
       h('div', { class: 'paint-info' },
         h('div', { class: 'paint-name' }, p.name),
         meta,
         p.tags.length ? h('div', { class: 'paint-tags' },
-          p.tags.map(tg => h('span', { class: 'chip-mini', style: `--tc:${tg.color}` }, tg.name))) : null)),
+          p.tags.map(tg => h('span', { class: 'chip-mini', style: `--tc:${tg.color}` }, tg.name))) : null));
+  if (picking) {
+    row.classList.add('selectable');
+    const mark = () => {
+      row.classList.toggle('picked', sel.ids.has(p.id));
+      link.setAttribute('aria-pressed', String(sel.ids.has(p.id)));
+    };
+    link.setAttribute('role', 'button');
+    link.addEventListener('click', e => {
+      e.preventDefault();
+      if (sel.ids.has(p.id)) sel.ids.delete(p.id); else sel.ids.add(p.id);
+      mark();
+      sel.onPick();
+    });
+    mark();
+  }
+  row.append(link,
     h('div', { class: 'qty', title: storageId ? t('Банок в этом хранилище') : t('Банок всего') }, minus, value, plus));
   return row;
 }
@@ -497,12 +516,42 @@ function goBack(fallback = '#/') {
 
 // ======================= paints list =======================
 
-const newFilters = () => ({ q: '', storage: '', maker: '', tags: new Set(), atHand: false, stock: '' });
+const SORTS = ['maker', 'name', 'qty_desc', 'qty_asc', 'new'];
+
+/** "Remember the sort order" on this device: off by default. */
+function rememberSort(set) {
+  try {
+    if (set !== undefined) {
+      localStorage.setItem('pa.rememberSort', set ? '1' : '0');
+      if (!set) localStorage.removeItem('pa.sort');
+    }
+    return localStorage.getItem('pa.rememberSort') === '1';
+  } catch {
+    return Boolean(set);
+  }
+}
+
+function savedSort() {
+  if (!rememberSort()) return 'maker';
+  try {
+    const s = localStorage.getItem('pa.sort');
+    return SORTS.includes(s) ? s : 'maker';
+  } catch {
+    return 'maker';
+  }
+}
+
+function saveSort(sort) {
+  if (!rememberSort()) return;
+  try { localStorage.setItem('pa.sort', sort); } catch { /* private mode */ }
+}
+
+const newFilters = () => ({ q: '', storage: '', maker: '', tags: new Set(), atHand: false, stock: '', sort: savedSort() });
 const filters = newFilters();          // the main paint list
 const storageFilters = new Map();      // one set per storage page, kept while you move around
 
 function resetFiltersOf(f) {
-  Object.assign(f, newFilters(), { tags: f.tags });
+  Object.assign(f, newFilters(), { tags: f.tags, sort: f.sort });  // the order is a view choice, not a filter
   f.tags.clear();
 }
 
@@ -527,7 +576,91 @@ function paintBrowser({ f, storageId = null, tags, storages, makers, emptyText, 
 
   const listBox = h('div');
   const summary = h('div', { class: 'summary' });
+  const bar = h('div', { class: 'bulk-bar', hidden: true });
   let current = [];
+  // picking several paints for one action (move, tags)
+  const sel = { on: false, ids: new Set(), onPick: () => drawBar() };
+
+  function drawList() {
+    if (current.length) listBox.replaceChildren(paintList(current, { storageId, sel }));
+    else if (anyFilterIn(f, storageId)) listBox.replaceChildren(h('div', { class: 'empty' }, t('Ничего не нашлось')));
+    else listBox.replaceChildren(emptyBig ? emptyBig() : h('div', { class: 'empty' }, emptyText));
+  }
+
+  function selecting(on) {
+    sel.on = on;
+    sel.ids.clear();
+    document.body.classList.toggle('selecting', on);
+    drawList();
+    drawBar();
+    updateSummary();
+  }
+  onLeave(() => document.body.classList.remove('selecting'));
+
+  async function bulk(body, okText) {
+    try {
+      const r = await api('POST', '/paints/bulk', { paint_ids: [...sel.ids], ...body });
+      toast(r.changed ? okText(r.changed) : t('Ничего не изменилось'), r.changed ? 'ok' : '');
+    } catch (e) {
+      toast(explain(e), 'err');
+    }
+    await refresh();
+  }
+
+  function drawBar() {
+    bar.hidden = !sel.on;
+    if (!sel.on) { bar.replaceChildren(); return; }
+    const n = sel.ids.size;
+    const allPicked = current.length > 0 && current.every(p => sel.ids.has(p.id));
+    const pickAll = h('button', { type: 'button', class: 'btn ghost', disabled: !current.length, onclick: () => {
+      if (allPicked) sel.ids.clear(); else current.forEach(p => sel.ids.add(p.id));
+      drawList();
+      drawBar();
+    } }, allPicked ? t('Снять все') : t('Выбрать все'));
+
+    const targets = storages.filter(s => s.id !== storageId);
+    const moveSel = h('select', { class: 'input', disabled: !n, 'aria-label': t('Переложить выбранные') },
+      h('option', { value: '' }, t('Переложить в…')),
+      targets.map(s => h('option', { value: String(s.id) }, s.name + (s.at_hand ? ' ✋' : ''))),
+      h('option', { value: 'none' }, t('без хранилища')));
+    moveSel.addEventListener('change', async () => {
+      const v = moveSel.value;
+      if (!v) return;
+      const to = v === 'none' ? null : Number(v);
+      const ok = await confirmDialog({
+        title: to === null
+          ? t('Оставить {0} без хранилища?', countPaints(n))
+          : t('Переложить {0} в «{1}»?', countPaints(n), targets.find(s => s.id === to).name),
+        text: storageId ? t('Переедут банки из этого хранилища.') : t('Переедут все банки этих красок, из всех хранилищ.'),
+        confirmLabel: t('Переложить'),
+        kind: 'primary',
+      });
+      if (!ok) { moveSel.value = ''; return; }
+      const body = { action: 'move', to_storage_id: to };
+      if (storageId) body.from_storage_id = storageId;
+      await bulk(body, k => t('Переложено красок: {0}', k));
+    });
+
+    const tagSel = (action, label, okText) => {
+      const el = h('select', { class: 'input', disabled: !n || !tags.length, 'aria-label': label },
+        h('option', { value: '' }, label),
+        tags.map(tg => h('option', { value: String(tg.id) }, tg.name)));
+      el.addEventListener('change', () => {
+        if (el.value) bulk({ action, tag_ids: [Number(el.value)] }, k => okText(k, tags.find(tg => tg.id === Number(el.value)).name));
+      });
+      return el;
+    };
+
+    bar.replaceChildren(
+      h('div', { class: 'bulk-head' },
+        h('b', null, n ? t('Выбрано: {0}', n) : t('Отметьте краски')),
+        pickAll,
+        h('button', { type: 'button', class: 'btn', onclick: () => selecting(false) }, t('Готово'))),
+      h('div', { class: 'bulk-actions' },
+        moveSel,
+        tagSel('add_tags', t('+ тег…'), (k, name) => t('Тег «{1}» добавлен: {0}', k, name)),
+        tagSel('remove_tags', t('− тег…'), (k, name) => t('Тег «{1}» снят: {0}', k, name))));
+  }
 
   const search = h('input', {
     class: 'input', type: 'search', value: f.q, enterkeyhint: 'search',
@@ -555,6 +688,14 @@ function paintBrowser({ f, storageId = null, tags, storages, makers, emptyText, 
   // in a storage every listed paint has pots there, so "used up" makes no sense
   if (storageId) stockSel.hidden = true;
 
+  const sortSel = h('select', { class: 'input', 'aria-label': t('Сортировка'), onchange: e => { f.sort = e.target.value; saveSort(f.sort); refresh(); } },
+    h('option', { value: 'maker' }, t('По производителю')),
+    h('option', { value: 'name' }, t('По названию')),
+    h('option', { value: 'qty_desc' }, t('Больше банок')),
+    h('option', { value: 'qty_asc' }, t('Меньше банок')),
+    h('option', { value: 'new' }, t('Недавно добавленные')));
+  sortSel.value = f.sort;
+
   const chips = h('div', { class: 'chips-scroll' },
     storageId ? null : toggleChip(t('✋ Под рукой'), { plain: true, pressed: f.atHand, onToggle: v => { f.atHand = v; refresh(); } }),
     tags.map(tg => toggleChip(tg.name, {
@@ -570,9 +711,14 @@ function paintBrowser({ f, storageId = null, tags, storages, makers, emptyText, 
   function updateSummary() {
     const pots = current.reduce((n, p) => n + here(p), 0);
     summary.replaceChildren(h('span', null, `${countPaints(current.length)} · ${countPots(pots)}`));
+    const buttons = h('span', { class: 'summary-actions' });
     if (anyFilterIn(f, storageId)) {
-      summary.append(h('button', { type: 'button', onclick: () => { resetFiltersOf(f); render(); } }, t('Сбросить фильтры')));
+      buttons.append(h('button', { type: 'button', onclick: () => { resetFiltersOf(f); render(); } }, t('Сбросить фильтры')));
     }
+    if (current.length && !sel.on) {
+      buttons.append(h('button', { type: 'button', onclick: () => selecting(true) }, t('Выбрать')));
+    }
+    summary.append(buttons);
   }
 
   let seq = 0;
@@ -587,6 +733,7 @@ function paintBrowser({ f, storageId = null, tags, storages, makers, emptyText, 
     f.tags.forEach(id => params.append('tag_id', id));
     if (f.atHand && !storageId) params.set('at_hand', 'true');
     if (f.stock && !storageId) params.set('in_stock', f.stock === 'in' ? 'true' : 'false');
+    if (f.sort && f.sort !== 'maker') params.set('sort', f.sort);
     if (onFabHref) onFabHref(f);
 
     let paints;
@@ -599,21 +746,24 @@ function paintBrowser({ f, storageId = null, tags, storages, makers, emptyText, 
     if (mySeq !== seq) return;
     paintWatchers.clear();
     current = paints;
+    // a filter or a move can hide picked paints: they stop being picked
+    const visible = new Set(paints.map(p => p.id));
+    for (const id of [...sel.ids]) if (!visible.has(id)) sel.ids.delete(id);
     updateSummary();
-    if (paints.length) listBox.replaceChildren(paintList(paints, { storageId }));
-    else if (anyFilterIn(f, storageId)) listBox.replaceChildren(h('div', { class: 'empty' }, t('Ничего не нашлось')));
-    else listBox.replaceChildren(emptyBig ? emptyBig() : h('div', { class: 'empty' }, emptyText));
+    drawList();
+    drawBar();
   }
 
   // quick +/- changes totals in the summary line
   document.addEventListener('paints-changed', updateSummary);
   onLeave(() => document.removeEventListener('paints-changed', updateSummary));
 
-  const selects = [storageSel, stockSel, makerSel].filter(Boolean);
+  const selects = [storageSel, stockSel, makerSel, sortSel].filter(Boolean);
   const el = h('div', null,
     h('div', { class: 'filters' }, search, h('div', { class: 'filter-row' }, selects), chips),
     summary,
-    listBox);
+    listBox,
+    bar);
   return { el, refresh };
 }
 
@@ -1817,13 +1967,20 @@ async function viewSettings(mount) {
         try { await setLang(code); } catch (err) { toast(t('Не получилось сохранить: {0}', err.message), 'err'); }
       }),
       h('div', { class: 'hint' }, t('Сохраняется в config.ini и действует на всех устройствах.'))));
-  const device = !touch ? null : h('div', { class: 'panel form' },
-    h('div', { class: 'field' }, h('span', { class: 'label' }, t('Камера при добавлении краски')),
+  const device = h('div', { class: 'panel form' },
+    !touch ? null : h('div', { class: 'field' }, h('span', { class: 'label' }, t('Камера при добавлении краски')),
       segButtons(t('Режим камеры'), [['photo', t('Фото')], ['stream', t('Поток + фото')]], cameraMode(), value => {
         cameraMode(value);
         render();
       }),
-      h('div', { class: 'hint' }, t('«Фото» открывает приложение камеры. «Поток» ловит штрихкоды в живом видео, но без HTTPS требует флаг Chrome.'))));
+      h('div', { class: 'hint' }, t('«Фото» открывает приложение камеры. «Поток» ловит штрихкоды в живом видео, но без HTTPS требует флаг Chrome.'))),
+    h('div', { class: 'field' }, h('span', { class: 'label' }, t('Запоминать сортировку')),
+      segButtons(t('Запоминать сортировку'), [['off', t('Нет')], ['on', t('Да')]], rememberSort() ? 'on' : 'off', value => {
+        rememberSort(value === 'on');
+        if (value === 'on') saveSort(filters.sort);
+        render();
+      }),
+      h('div', { class: 'hint' }, t('Выбранная сортировка списка сохранится после перезагрузки страницы.'))));
 
   let signIn;
   if (!state.enabled) {
@@ -1871,7 +2028,7 @@ async function viewSettings(mount) {
     pageHead(t('Настройки')),
     h('h2', null, t('Язык')), language,
     h('h2', null, t('Резервная копия')), backupPanel(),
-    device ? h('h2', null, t('На этом устройстве')) : null, device,
+    h('h2', null, t('На этом устройстве')), device,
     h('h2', null, t('Вход по паролю')), signIn,
     h('p', { class: 'muted small' },
       t('Пароль передаётся по сети без шифрования (http), поэтому не используйте пароль от важных аккаунтов. '),

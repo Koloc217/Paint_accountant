@@ -5,7 +5,7 @@ from __future__ import annotations
 import io
 import os
 import sqlite3
-from typing import Iterator
+from typing import Iterator, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from starlette.concurrency import run_in_threadpool
@@ -16,6 +16,8 @@ from .db import connect
 from .netinfo import lan_url
 from .config import save_language
 from .schemas import (
+    BulkIn,
+    BulkResult,
     LanguageIn,
     Manufacturer,
     ManufacturerIn,
@@ -122,6 +124,8 @@ def list_paints(
     in_stock: bool | None = Query(None, description="true: quantity > 0, false: quantity = 0"),
     barcode: str | None = Query(None, description="exact barcode"),
     uuid: list[str] = Query([], description="repeat to get several paints by their permanent uuid"),
+    sort: Literal["maker", "name", "qty_desc", "qty_asc", "new"] = Query(
+        "maker", description="maker: manufacturer then name; name; qty_desc/qty_asc: by pots; new: recently added first"),
     conn: sqlite3.Connection = Conn,
 ):
     return repo.list_paints(
@@ -136,6 +140,7 @@ def list_paints(
         in_stock=in_stock,
         barcode=barcode,
         uuids=uuid,
+        sort=sort,
     )
 
 
@@ -179,6 +184,19 @@ def move_pots(paint_id: int, body: MoveIn, conn: sqlite3.Connection = Conn):
     """Move pots from one storage to another (null = without a storage)."""
     try:
         return repo.move_pots(conn, paint_id, body.from_storage_id, body.to_storage_id, body.count)
+    except _DOMAIN_ERRORS as exc:
+        raise _translate(exc)
+
+
+@router.post("/paints/bulk", response_model=BulkResult, tags=["paints"])
+def bulk_paints(body: BulkIn, conn: sqlite3.Connection = Conn):
+    """Change several paints at once: move all their pots to a storage, or add / remove tags.
+    Everything is done in one transaction; `changed` tells how many paints actually changed."""
+    kw: dict = {"to_storage_id": body.to_storage_id, "tag_ids": body.tag_ids}
+    if "from_storage_id" in body.model_fields_set:
+        kw["from_storage_id"] = body.from_storage_id
+    try:
+        return repo.bulk_paints(conn, body.paint_ids, body.action, **kw)
     except _DOMAIN_ERRORS as exc:
         raise _translate(exc)
 
