@@ -66,7 +66,8 @@ class Line:
     x: float
     y: float
     height: float
-    kind: str = "other"  # manufacturer | code | tag | name | other | noise
+    width: float = 0.0
+    kind: str = "other"  # manufacturer | code | tag | name | other | filler | noise | background
 
 
 @dataclass
@@ -162,7 +163,8 @@ def _read_text(img) -> list[Line]:
             continue
         xs = [p[0] for p in box]
         ys = [p[1] for p in box]
-        lines.append(Line(text=text, score=float(score), x=min(xs), y=min(ys), height=max(ys) - min(ys)))
+        lines.append(Line(text=text, score=float(score), x=min(xs), y=min(ys),
+                          height=max(ys) - min(ys), width=max(xs) - min(xs)))
     lines.sort(key=lambda ln: (round(ln.y / 12), ln.x))  # reading order: top to bottom, left to right
     return lines
 
@@ -379,6 +381,31 @@ def _maker_by_barcode(conn: sqlite3.Connection, barcode: str, makers: list[dict]
     return next((m for m in makers if known and norm(m["name"]) == norm(known)), None)
 
 
+def _mark_background(lines: list[Line], anchors: list[Line]) -> None:
+    """Text far from the label is the background: keyboard keys, a cutting mat, another pot.
+
+    The label is where the brand and the code were found. Everything clearly outside that area
+    (with a generous margin — the name can sit well below the logo) becomes "background":
+    it can't become the name, and the page shows it folded away instead of mixing it in.
+    """
+    if len(anchors) < 2:
+        return  # one line says little about where the label ends; better keep everything
+    x0 = min(a.x for a in anchors)
+    x1 = max(a.x + a.width for a in anchors)
+    y0 = min(a.y for a in anchors)
+    y1 = max(a.y + a.height for a in anchors)
+    tall = max(a.height for a in anchors)
+    mx = max(4 * tall, 0.6 * (x1 - x0))
+    my = max(4 * tall, 0.6 * (y1 - y0))
+    for ln in lines:
+        if ln.kind not in ("other", "filler", "tag"):
+            continue
+        cx = ln.x + ln.width / 2
+        cy = ln.y + ln.height / 2
+        if cx < x0 - mx or cx > x1 + mx or cy < y0 - my or cy > y1 + my:
+            ln.kind = "background"
+
+
 def _tag_ids(text: str, keywords: list[tuple[str, int]]) -> list[int]:
     words = set(norm(text).split())
     return sorted({tag_id for kw, tag_id in keywords if kw.lower() in words})
@@ -430,6 +457,12 @@ def suggest(conn: sqlite3.Connection, reading: Reading) -> dict[str, Any]:
             else:
                 # only generic words ("PAINT"): not a name on its own, but can be part of one
                 ln.kind = "filler" if all(w.isalpha() for w in words) else "noise"
+
+    # --- text far from the brand and the code is not on this label
+    anchors = [ln for ln in lines if ln.kind == "manufacturer"]
+    if code_line is not None and code_line not in anchors:
+        anchors.append(code_line)
+    _mark_background(lines, anchors)
 
     # --- name: the biggest remaining text is usually the paint name
     # if every remaining line is made of tag words ("PAINT" / "REVITALIZER"), the biggest one is the name
@@ -527,6 +560,7 @@ def suggest(conn: sqlite3.Connection, reading: Reading) -> dict[str, Any]:
             if score >= MATCH_THRESHOLD:
                 matches[paint["id"]] = {"paint": paint, "score": round(min(score, 100)), "by": "text"}
 
+    label_text = " ".join(ln.text for ln in lines if ln.kind != "background")
     best_matches = sorted(matches.values(), key=lambda m: -m["score"])[:3]
 
     return {
@@ -539,7 +573,7 @@ def suggest(conn: sqlite3.Connection, reading: Reading) -> dict[str, Any]:
             "manufacturer": {"id": maker["id"], "name": maker["name"]} if maker else None,
             "code": code,
             "barcode": next((b["text"] for b in barcodes if b["paint_id"] is None), None),
-            "tag_ids": _tag_ids(f"{full_text} {name or ''}", keywords),  # the name with glued words split
+            "tag_ids": _tag_ids(f"{label_text} {name or ''}", keywords),  # the name with glued words split
         },
         "matches": best_matches,
     }

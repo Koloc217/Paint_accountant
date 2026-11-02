@@ -469,3 +469,29 @@ def test_citadel_trademark_quote_is_dropped(conn):
     r = suggest(conn, _real([("CITADEL", 100, 40, 30), ('NULN OIL"', 60, 120, 70)]))
     assert r["suggestion"]["manufacturer"]["name"] == "Citadel"
     assert r["suggestion"]["name"] == "Nuln Oil"
+
+
+def test_keyboard_behind_the_pot_is_background(client, conn):
+    # a real Vallejo label read from a phone photo, plus keyboard keys above it in the frame
+    keys = [("FII", 40, 60, 22), ("num", 160, 60, 22), ("bgup", 300, 60, 22), ("clear", 450, 60, 22),
+            ("backspace", 40, 140, 22), ("ins", 300, 140, 22), ("end", 450, 140, 22), ("Pgdn", 600, 140, 22),
+            ("del", 40, 220, 22), ("enter", 300, 220, 22)]
+    label = [("Vallejo", 216, 513, 49), ("TRUE", 224, 581, 37), ("METALLIC", 224, 611, 37),
+             ("METAL", 225, 641, 39), ("Airbrush", 228, 678, 32), ("77.176 Oro Verde", 232, 720, 26)]
+    lines = [Line(text=t, score=0.95, x=x, y=y, height=h, width=12 * len(t)) for t, x, y, h in keys + label]
+    r = suggest(conn, Reading(lines=lines, width=720, height=1280))
+    kinds = {ln["text"]: ln["kind"] for ln in r["lines"]}
+    assert all(kinds[t] == "background" for t, *_ in keys)
+    assert all(kinds[t] != "background" for t, *_ in label)
+    s = r["suggestion"]
+    assert s["manufacturer"]["name"] == "Vallejo"
+    assert s["code"] == "77.176"
+    assert not set(s["name"].lower().split()) & {t.lower() for t, *_ in keys}
+
+
+def test_without_two_anchors_nothing_is_called_background(conn):
+    # only the code is known: where the label ends can't be told, so nothing is folded away
+    lines = [Line(text="FLAT BLACK", score=0.95, x=10, y=10, height=60, width=300),
+             Line(text="XF-1", score=0.95, x=900, y=900, height=20, width=60)]
+    r = suggest(conn, Reading(lines=lines))
+    assert all(ln["kind"] != "background" for ln in r["lines"])

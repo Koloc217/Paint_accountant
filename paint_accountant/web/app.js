@@ -1114,11 +1114,26 @@ function photoRecognizer({ status, fill }) {
   const video = h('video', { class: 'stream-video', playsinline: true, muted: true, autoplay: true });
   video.muted = true;
   const streamStatus = h('div', { class: 'stream-status' }, t('Наведите камеру на штрихкод банки'));
+  // The aim is wide for a barcode and tall for a label. In label mode the snapshot is cut to the aim,
+  // so the keyboard, the mat and other pots around never reach the text recognition.
+  const aim = h('div', { class: 'stream-aim' });
+  const frame = h('div', { class: 'stream-frame', title: t('Тап по кадру — рамка для этикетки или штрихкода') }, video, aim);
+  const aimHint = h('div', { class: 'muted small' });
+  let labelAim = false;
+  function setLabelAim(on) {
+    labelAim = on;
+    aim.classList.toggle('label', on);
+    aimHint.textContent = on
+      ? t('Этикетка в рамке — распознаю только её. Тап по кадру вернёт рамку штрихкода.')
+      : t('Тап по кадру — рамка для этикетки.');
+  }
+  frame.addEventListener('click', () => setLabelAim(!labelAim));
   const shutter = h('button', { type: 'button', class: 'btn primary' }, t('📸 Снимок этикетки'));
   const closeStream = h('button', { type: 'button', class: 'btn' }, t('Закрыть'));
   const streamBox = h('div', { class: 'panel stream-box', hidden: true },
-    h('div', { class: 'stream-frame' }, video, h('div', { class: 'stream-aim' })),
+    frame,
     streamStatus,
+    aimHint,
     h('div', { class: 'row' }, shutter, closeStream));
   let stream = null;
   let scanning = false;
@@ -1128,7 +1143,7 @@ function photoRecognizer({ status, fill }) {
 
   closeStream.addEventListener('click', () => stopStream());
   shutter.addEventListener('click', async () => {
-    const blob = await frameBlob(1600, 0.9);
+    const blob = await frameBlob(1600, 0.9, labelAim ? aimCrop() : null);
     stopStream();
     if (blob) recognize(blob);
   });
@@ -1154,6 +1169,7 @@ function photoRecognizer({ status, fill }) {
     video.srcObject = stream;
     streamBox.hidden = false;
     lastCode = null;
+    setLabelAim(false);
     streamStatus.replaceChildren(t('Наведите камеру на штрихкод банки'));
     try { await video.play(); } catch { /* autoplay is allowed for muted video */ }
     detector = await barcodeDetector();
@@ -1182,13 +1198,32 @@ function photoRecognizer({ status, fill }) {
     }
   }
 
-  async function frameBlob(maxSide, quality) {
+  /** The aim's area in video pixels (the video is shown with object-fit: cover), with a small margin. */
+  function aimCrop() {
+    const vw = video.videoWidth, vh = video.videoHeight;
+    const f = frame.getBoundingClientRect();
+    const a = aim.getBoundingClientRect();
+    if (!vw || !f.width || !a.width) return null;
+    const k = Math.max(f.width / vw, f.height / vh); // screen px per video px
+    const offX = (f.width - vw * k) / 2, offY = (f.height - vh * k) / 2;
+    const pad = 0.08;
+    const x0 = (a.left - f.left - offX) / k - a.width / k * pad;
+    const y0 = (a.top - f.top - offY) / k - a.height / k * pad;
+    const x1 = (a.right - f.left - offX) / k + a.width / k * pad;
+    const y1 = (a.bottom - f.top - offY) / k + a.height / k * pad;
+    const sx = Math.max(0, x0), sy = Math.max(0, y0);
+    const sw = Math.min(vw, x1) - sx, sh = Math.min(vh, y1) - sy;
+    return sw > 0 && sh > 0 ? { sx, sy, sw, sh } : null;
+  }
+
+  async function frameBlob(maxSide, quality, crop = null) {
     if (!video.videoWidth) return null;
-    const k = Math.min(1, maxSide / Math.max(video.videoWidth, video.videoHeight));
+    const c = crop || { sx: 0, sy: 0, sw: video.videoWidth, sh: video.videoHeight };
+    const k = Math.min(1, maxSide / Math.max(c.sw, c.sh));
     const canvas = document.createElement('canvas');
-    canvas.width = Math.round(video.videoWidth * k);
-    canvas.height = Math.round(video.videoHeight * k);
-    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.width = Math.round(c.sw * k);
+    canvas.height = Math.round(c.sh * k);
+    canvas.getContext('2d').drawImage(video, c.sx, c.sy, c.sw, c.sh, 0, 0, canvas.width, canvas.height);
     return new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', quality));
   }
 
@@ -1231,9 +1266,10 @@ function photoRecognizer({ status, fill }) {
         matchRow({ paint: found[0], score: 100, by: 'barcode' }, { barcode: null }, afterAdd));
     } else {
       if (!fill.barcode.trim()) fill.barcode = code;
+      setLabelAim(true);
       streamStatus.replaceChildren(
         h('b', null, t('Новый штрихкод {0}', code)),
-        h('div', { class: 'muted small' }, t('Его ещё нет в каталоге. Наведите камеру на этикетку и нажмите «Снимок этикетки» — заполню остальное.')));
+        h('div', { class: 'muted small' }, t('Его ещё нет в каталоге. Поставьте этикетку в рамку и нажмите «Снимок этикетки» — заполню остальное.')));
       shutter.classList.add('pulse');
     }
   }
@@ -1351,11 +1387,25 @@ function photoRecognizer({ status, fill }) {
         },
       }, l.text));
       markPicked();
+      // text far from the label (keyboard keys, the mat) is folded away, but still one tap away
+      const near = chips.filter((c, i) => lines[i].kind !== 'background');
+      const far = chips.filter((c, i) => lines[i].kind === 'background');
+      let more = null;
+      if (far.length) {
+        const farBox = h('div', { class: 'tag-picker far-chips', hidden: true }, far);
+        const toggle = h('button', { type: 'button', class: 'link-btn small' }, t('Ещё {0} — похоже на фон', far.length));
+        toggle.addEventListener('click', () => {
+          farBox.hidden = !farBox.hidden;
+          toggle.textContent = farBox.hidden ? t('Ещё {0} — похоже на фон', far.length) : t('Скрыть фон');
+        });
+        more = h('div', { class: 'far-block' }, toggle, farBox);
+      }
       parts.push(h('div', { class: 'photo-section' },
         h('b', null, t('Текст с этикетки')),
         h('div', { class: 'muted small' }, t('В название куски добавляются по порядку, повторный тап убирает. Код и производитель — замена.')),
         seg,
-        h('div', { class: 'tag-picker' }, chips)));
+        near.length ? h('div', { class: 'tag-picker' }, near) : null,
+        more));
     } else {
       parts.push(h('p', { class: 'muted small', style: 'margin:8px 0 0' },
         t('Текст не найден. Снимите этикетку ближе, ровно и при хорошем свете, без бликов.')));
