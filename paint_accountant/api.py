@@ -5,7 +5,7 @@ from __future__ import annotations
 import io
 import os
 import sqlite3
-from typing import Iterator
+from typing import Iterator, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from starlette.concurrency import run_in_threadpool
@@ -122,6 +122,8 @@ def list_paints(
     in_stock: bool | None = Query(None, description="true: quantity > 0, false: quantity = 0"),
     barcode: str | None = Query(None, description="exact barcode"),
     uuid: list[str] = Query([], description="repeat to get several paints by their permanent uuid"),
+    sort: Literal["maker", "name", "qty_desc", "qty_asc", "new"] = Query(
+        "maker", description="maker: manufacturer then name; name; qty_desc/qty_asc: by pots; new: recently added first"),
     conn: sqlite3.Connection = Conn,
 ):
     return repo.list_paints(
@@ -136,6 +138,7 @@ def list_paints(
         in_stock=in_stock,
         barcode=barcode,
         uuids=uuid,
+        sort=sort,
     )
 
 

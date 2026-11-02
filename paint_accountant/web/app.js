@@ -497,12 +497,12 @@ function goBack(fallback = '#/') {
 
 // ======================= paints list =======================
 
-const newFilters = () => ({ q: '', storage: '', maker: '', tags: new Set(), atHand: false, stock: '' });
+const newFilters = () => ({ q: '', storage: '', maker: '', tags: new Set(), atHand: false, stock: '', sort: 'maker' });
 const filters = newFilters();          // the main paint list
 const storageFilters = new Map();      // one set per storage page, kept while you move around
 
 function resetFiltersOf(f) {
-  Object.assign(f, newFilters(), { tags: f.tags });
+  Object.assign(f, newFilters(), { tags: f.tags, sort: f.sort });  // the order is a view choice, not a filter
   f.tags.clear();
 }
 
@@ -555,6 +555,14 @@ function paintBrowser({ f, storageId = null, tags, storages, makers, emptyText, 
   // in a storage every listed paint has pots there, so "used up" makes no sense
   if (storageId) stockSel.hidden = true;
 
+  const sortSel = h('select', { class: 'input', 'aria-label': t('Сортировка'), onchange: e => { f.sort = e.target.value; refresh(); } },
+    h('option', { value: 'maker' }, t('По производителю')),
+    h('option', { value: 'name' }, t('По названию')),
+    h('option', { value: 'qty_desc' }, t('Больше банок')),
+    h('option', { value: 'qty_asc' }, t('Меньше банок')),
+    h('option', { value: 'new' }, t('Недавно добавленные')));
+  sortSel.value = f.sort;
+
   const chips = h('div', { class: 'chips-scroll' },
     storageId ? null : toggleChip(t('✋ Под рукой'), { plain: true, pressed: f.atHand, onToggle: v => { f.atHand = v; refresh(); } }),
     tags.map(tg => toggleChip(tg.name, {
@@ -587,6 +595,7 @@ function paintBrowser({ f, storageId = null, tags, storages, makers, emptyText, 
     f.tags.forEach(id => params.append('tag_id', id));
     if (f.atHand && !storageId) params.set('at_hand', 'true');
     if (f.stock && !storageId) params.set('in_stock', f.stock === 'in' ? 'true' : 'false');
+    if (f.sort && f.sort !== 'maker') params.set('sort', f.sort);
     if (onFabHref) onFabHref(f);
 
     let paints;
@@ -609,7 +618,7 @@ function paintBrowser({ f, storageId = null, tags, storages, makers, emptyText, 
   document.addEventListener('paints-changed', updateSummary);
   onLeave(() => document.removeEventListener('paints-changed', updateSummary));
 
-  const selects = [storageSel, stockSel, makerSel].filter(Boolean);
+  const selects = [storageSel, stockSel, makerSel, sortSel].filter(Boolean);
   const el = h('div', null,
     h('div', { class: 'filters' }, search, h('div', { class: 'filter-row' }, selects), chips),
     summary,

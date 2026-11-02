@@ -204,3 +204,18 @@ def test_paint_has_permanent_uuid_and_can_be_found_by_it(client):
     several = client.get("/api/paints", params=[("uuid", a["uuid"]), ("uuid", b["uuid"].upper())]).json()
     assert {p["id"] for p in several} == {a["id"], b["id"]}
     assert client.get("/api/paints", params={"uuid": a["uuid"]}).json()[0]["id"] == a["id"]
+
+
+def test_sort(client):
+    a = _paint(client, name="Zandri Dust", quantity=1)
+    b = _paint(client, name="Abaddon Black", quantity=3, storage_id=None)
+    c = _paint(client, name="Basilicanum Grey", manufacturer="AK", quantity=2, storage_id=None)
+
+    order = lambda **p: [x["id"] for x in client.get("/api/paints", params=p).json()]  # noqa: E731
+    assert order() == [c["id"], b["id"], a["id"]]                     # AK first, then Citadel by name
+    assert order(sort="maker") == order()
+    assert order(sort="name") == [b["id"], c["id"], a["id"]]
+    assert order(sort="qty_desc") == [b["id"], c["id"], a["id"]]
+    assert order(sort="qty_asc") == [a["id"], c["id"], b["id"]]
+    assert order(sort="new")[0] == c["id"]                            # same second -> newest id first
+    assert client.get("/api/paints", params={"sort": "hex"}).status_code == 422

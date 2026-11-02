@@ -487,6 +487,17 @@ _PAINT_SELECT = """
 _TOTAL = "(SELECT coalesce(sum(quantity), 0) FROM paint_location WHERE paint_id = p.id)"
 
 
+# list orders; ties always fall back to manufacturer + name so the list is stable
+_ORDER = {
+    "maker": "py_lower(m.name), py_lower(p.name), p.id",
+    "name": "py_lower(p.name), py_lower(m.name), p.id",
+    "qty_desc": f"{_TOTAL} DESC, py_lower(m.name), py_lower(p.name), p.id",
+    "qty_asc": f"{_TOTAL} ASC, py_lower(m.name), py_lower(p.name), p.id",
+    "new": "p.created_at DESC, p.id DESC",
+}
+SORTS = tuple(_ORDER)
+
+
 def list_paints(
     conn: sqlite3.Connection,
     *,
@@ -500,6 +511,7 @@ def list_paints(
     in_stock: bool | None = None,
     barcode: str | None = None,
     uuids: list[str] | None = None,
+    sort: str = "maker",
 ) -> list[dict]:
     where: list[str] = []
     params: list[Any] = []
@@ -540,7 +552,7 @@ def list_paints(
     sql = _PAINT_SELECT
     if where:
         sql += " WHERE " + " AND ".join(where)
-    sql += " ORDER BY py_lower(m.name), py_lower(p.name), p.id"
+    sql += " ORDER BY " + _ORDER.get(sort, _ORDER["maker"])
     return _assemble_paints(conn, conn.execute(sql, params).fetchall())
 
 
