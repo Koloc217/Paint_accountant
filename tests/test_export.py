@@ -36,15 +36,14 @@ def _get(c, **params):
 def test_short_lists_only_paints_in_stock_by_manufacturer(client):
     _fill(client)
     text = _get(client)
-    assert text.startswith("# Мои краски для миниатюр")
-    assert "в наличии: 2" in text
+    assert text.startswith("## Citadel\n")  # no header: the list itself
     assert "- Nuln Oil — #1c1c1c — Проливка" in text
     assert "- Gunmetal Grey (70.863) — Металлик" in text
     assert "Abaddon" not in text
     assert text.index("## Citadel") < text.index("## Vallejo")
     # no storages, pots or barcodes in the short one
     assert "Коробка" not in text and "8429551708630" not in text and "×" not in text
-    assert "часть каталога" not in text
+    assert "#  " not in text and "Строка" not in text
 
 
 def test_full_has_storages_pots_barcodes_and_out_of_stock(client):
@@ -62,9 +61,9 @@ def test_filters_apply_and_are_mentioned(client):
     _, _, tags = _fill(client)
     text = _get(client, tag_id=tags["Металлик"])
     assert "Gunmetal" in text and "Nuln" not in text
-    assert "Это часть каталога, выбранная фильтром." in text
+    assert "Это часть каталога, выбранная фильтром." in _get(client, level="full", tag_id=tags["Металлик"])
     out = _get(client, in_stock="false")
-    assert "закончились: 1" in out and "Abaddon Black" in out and "Nuln" not in out
+    assert out == "## Citadel\n- Abaddon Black\n"
 
 
 def test_english_download_and_empty(client):
@@ -72,7 +71,7 @@ def test_english_download_and_empty(client):
     r = client.get("/api/export/paints.md", params={"level": "full", "lang": "en", "download": "true"})
     assert "attachment" in r.headers["content-disposition"] and "paints-full-" in r.headers["content-disposition"]
     assert r.text.startswith("# Paint catalog") and "## Out of stock" in r.text
-    assert "Подходящих красок нет." in _get(client, q="nothing like this")
+    assert _get(client, q="nothing like this") == "Подходящих красок нет.\n"
 
 
 def test_bad_level_is_rejected(client):

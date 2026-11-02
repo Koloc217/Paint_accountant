@@ -4,15 +4,14 @@ Two levels:
 
 short — for a neural network: "here is what I have, can I mix/substitute or do I
         have to buy?". Only paints in stock (unless a stock filter says otherwise),
-        grouped by manufacturer, one line each: name (code) — #hex — tags.
-        A short header tells the model what the lines mean.
+        grouped by manufacturer, one line each: name (code) — #hex — tags. No header.
 
 full  — everything the catalog knows: totals, a summary of storages, then per paint
         the code, color, tags, where the pots are (storage ×N, ✋ = at hand) and the
         barcode; paints that ran out are listed in their own section at the end.
 
 Both follow the filters of the paint list, so "only metallics" or "only box 3" can be
-exported as well; the header then says the list is a part of the catalog.
+exported as well; the full one then says the list is a part of the catalog.
 """
 
 from __future__ import annotations
@@ -26,11 +25,6 @@ LEVELS = ("short", "full")
 
 TEXT = {
     "ru": {
-        "short_title": "Мои краски для миниатюр",
-        "short_intro": "Краски, которые у меня есть в наличии: {paints}. "
-                       "Строка: название (код) — цвет hex — теги. Цвет указан не у всех и он примерный.",
-        "short_intro_out": "Краски, которые у меня закончились: {paints}. "
-                           "Строка: название (код) — цвет hex — теги. Цвет указан не у всех и он примерный.",
         "full_title": "Каталог красок",
         "full_intro": "Выгрузка {date}. Красок: {paints}, в наличии {in_stock}, банок {pots}.",
         "legend": "Строка: название (код) — цвет hex — теги — где лежит (хранилище ×банок, ✋ — под рукой) — штрихкод.",
@@ -43,11 +37,6 @@ TEXT = {
         "empty": "Подходящих красок нет.",
     },
     "en": {
-        "short_title": "My miniature paints",
-        "short_intro": "Paints I have in stock: {paints}. "
-                       "Line: name (code) — hex color — tags. Not every paint has a color, and colors are approximate.",
-        "short_intro_out": "Paints I have run out of: {paints}. "
-                           "Line: name (code) — hex color — tags. Not every paint has a color, and colors are approximate.",
         "full_title": "Paint catalog",
         "full_intro": "Exported {date}. Paints: {paints}, in stock {in_stock}, pots {pots}.",
         "legend": "Line: name (code) — hex color — tags — where (storage ×pots, ✋ = at hand) — barcode.",
@@ -100,13 +89,10 @@ def _by_maker(paints: list[dict], line) -> list[str]:
     return lines
 
 
-def _short(paints: list[dict], tx: dict, filtered: bool, only_out: bool) -> list[str]:
-    intro = tx["short_intro_out" if only_out else "short_intro"].format(paints=len(paints))
-    lines = [f"# {tx['short_title']}", "", intro]
-    if filtered:
-        lines.append(tx["part"])
-    lines += _by_maker(paints, lambda p: " — ".join(_base(p)))
-    return lines
+def _short(paints: list[dict]) -> list[str]:
+    """Just the list: no header, so it can be pasted into any question as is."""
+    lines = _by_maker(paints, lambda p: " — ".join(_base(p)))
+    return lines[1:]  # no blank line before the first manufacturer
 
 
 def _full(paints: list[dict], tx: dict, filtered: bool) -> list[str]:
@@ -169,7 +155,7 @@ def paints_markdown(conn: sqlite3.Connection, level: str = "short", lang: str = 
     if level == "full":
         lines = _full(paints, tx, filtered)
     else:
-        lines = _short(paints, tx, filtered, only_out=filters.get("in_stock") is False)
+        lines = _short(paints)
     if not paints:
         lines += ["", tx["empty"]]
-    return "\n".join(lines) + "\n"
+    return "\n".join(lines).strip("\n") + "\n"
