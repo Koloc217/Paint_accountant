@@ -61,6 +61,31 @@ def test_csv_in_english_uses_commas(client):
     assert rows[0][0] == "Manufacturer" and len(rows) == 4
 
 
+def test_csv_in_english_translates_starter_tags_and_storage(client):
+    _fill(client)
+    own = client.post("/api/tags", json={"name": "Мой тег"}).json()
+    vallejo = next(p for p in client.get("/api/paints").json() if p["name"] == "Gunmetal Grey")
+    client.patch(f"/api/paints/{vallejo['id']}", json={"tag_ids": [own["id"]]})
+    rows = {r[1]: r for r in _rows(client.get("/api/backup/paints.csv?lang=en").content, delimiter=",")}
+    assert rows["Nuln Oil"][6] == "Wash"                  # a starter tag, translated
+    assert rows["Gunmetal Grey"][5] == "At hand ×1"       # the starter storage, translated
+    assert rows["Gunmetal Grey"][6] == "Мой тег"          # the user's own names stay as typed
+    assert rows["Nuln Oil"][5] == "Коробка 1 ×2"
+    ru = {r[1]: r for r in _rows(client.get("/api/backup/paints.csv?lang=ru").content)}
+    assert ru["Nuln Oil"][6] == "Проливка" and ru["Gunmetal Grey"][5] == "Под рукой ×1"
+
+
+def test_builtin_names_are_the_same_in_python_and_js():
+    import re
+    from pathlib import Path
+    src = (Path(db.__file__).parent / "web" / "i18n.js").read_text(encoding="utf-8")
+    body = src[src.index("const BUILTIN_EN = {") + len("const BUILTIN_EN = "):]
+    body = body[:body.index("\n};") + 2]
+    assert json.loads(re.sub(r",\s*}$", "}", body)) == db.BUILTIN_EN
+    starters = {name for name, *_ in db.STARTER_TAGS} | {"Техническая", "Под рукой"}
+    assert starters == db.BUILTIN_EN.keys()
+
+
 def test_dump_moves_everything_to_another_machine(client, tmp_path):
     _fill(client)
     client.post("/api/auth/password", json={"password": "secret1"})

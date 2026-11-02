@@ -112,7 +112,7 @@ async function api(method, path, body) {
     if (res.status === 401 && d && d.code === 'auth_required') goToLogin();
     throw new ApiError(res.status, msg, d && typeof d === 'object' && !Array.isArray(d) ? d : null);
   }
-  return data;
+  return localizeBuiltins(data);
 }
 
 function explain(err, conflictText) {
@@ -1304,7 +1304,7 @@ function photoRecognizer({ status, fill }) {
         if (res.status === 401 && d && d.code === 'auth_required') goToLogin();
         throw new ApiError(res.status, (typeof d === 'string' ? d : d && d.message) || t('Ошибка {0}', res.status));
       }
-      show(data);
+      show(localizeBuiltins(data));
     } catch (err) {
       if (!(err instanceof ApiError)) console.error(err);
       panel.replaceChildren(head(t('Не получилось распознать'), err.status === 422 ? t('Файл не похож на фото') : explain(err)));

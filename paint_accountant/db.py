@@ -271,6 +271,30 @@ STARTER_TAGS: list[tuple[str, str, list[str]]] = [
 ]
 
 
+# Starter names are created in Russian and stay so in the database (old migrations find tags by
+# these names). An English interface and the English CSV show them translated; a tag the user
+# renamed or created is shown as typed. Keep in sync with BUILTIN_EN in web/i18n.js.
+BUILTIN_EN: dict[str, str] = {
+    "Грунт": "Primer",
+    "Основа": "Base",
+    "Слой": "Layer",
+    "Контраст": "Contrast",
+    "Проливка": "Wash",
+    "Спецэффект": "Special effect",
+    "Металлик": "Metallic",
+    "Чернила": "Ink",
+    "Лак": "Varnish",
+    "Для аэрографа": "Airbrush",
+    "Техническая": "Technical",
+    "Под рукой": "At hand",
+}
+
+
+def builtin_name(name: str, lang: str) -> str:
+    """A starter tag or storage name in the given language; any other name as it is."""
+    return BUILTIN_EN.get(name, name) if lang == "en" else name
+
+
 def connect(db_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.row_factory = sqlite3.Row

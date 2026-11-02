@@ -26,6 +26,34 @@ function t(text, ...args) {
   return args.length ? s.replace(/\{(\d+)\}/g, (m, i) => (args[i] === undefined ? m : String(args[i]))) : s;
 }
 
+// Starter tags and the "at hand" storage are created in Russian and kept so in the database.
+// In English they are shown translated; names the user typed are shown as they are.
+// Keep in sync with BUILTIN_EN in db.py.
+const BUILTIN_EN = {
+  "Грунт": "Primer",
+  "Основа": "Base",
+  "Слой": "Layer",
+  "Контраст": "Contrast",
+  "Проливка": "Wash",
+  "Спецэффект": "Special effect",
+  "Металлик": "Metallic",
+  "Чернила": "Ink",
+  "Лак": "Varnish",
+  "Для аэрографа": "Airbrush",
+  "Техническая": "Technical",
+  "Под рукой": "At hand",
+};
+
+/** Translate starter tag and storage names anywhere in an API answer (every "name" field). */
+function localizeBuiltins(data) {
+  if (LANG !== 'en' || data === null || typeof data !== 'object') return data;
+  if (Array.isArray(data)) { data.forEach(localizeBuiltins); return data; }
+  for (const [key, value] of Object.entries(data)) {
+    if (key === 'name' && typeof value === 'string' && BUILTIN_EN[value]) data[key] = BUILTIN_EN[value];
+    else if (value && typeof value === 'object') localizeBuiltins(value);
+  }
+  return data;
+}
 
 const EN = {
   "python run.py --restore копия.zip": "python run.py --restore backup.zip",
