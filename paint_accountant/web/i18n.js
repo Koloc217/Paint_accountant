@@ -320,7 +320,6 @@ const EN = {
   "Вход по паролю": "Password sign-in",
   "Пароль передаётся по сети без шифрования (http), поэтому не используйте пароль от важных аккаунтов. ": "The password travels over the network unencrypted (http), so don't reuse a password from important accounts. ",
   "Краски": "Paints",
-  "Как в браузере": "Browser's",
   "Не получилось сохранить: {0}": "Couldn't save: {0}",
   "Сохраняется в config.ini и действует на всех устройствах.": "Saved in config.ini, applies to every device.",
   "💾 Сохранить картинку": "💾 Save image",

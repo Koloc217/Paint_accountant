@@ -1960,12 +1960,19 @@ async function viewSettings(mount) {
   const [state, info] = await Promise.all([api('GET', '/auth'), api('GET', '/info').catch(() => ({}))]);
   const touch = window.matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
 
+  // "auto" (the browser's language) stays possible in config.ini, but is not offered here:
+  // the list shows the language actually in use, and picking one saves it for every device
+  const langSel = h('select', { class: 'input', 'aria-label': t('Язык'), onchange: async e => {
+    const code = e.target.value;
+    if (code === LANG_SETTING) return;
+    try { await setLang(code); } catch (err) {
+      e.target.value = LANG;
+      toast(t('Не получилось сохранить: {0}', err.message), 'err');
+    }
+  } }, LANGS.map(([code, name]) => h('option', { value: code }, name)));
+  langSel.value = LANG;
   const language = h('div', { class: 'panel form' },
-    h('div', { class: 'field' },
-      segButtons(t('Язык'), [['auto', t('Как в браузере')], ...LANGS], LANG_SETTING, async code => {
-        if (code === LANG_SETTING) return;
-        try { await setLang(code); } catch (err) { toast(t('Не получилось сохранить: {0}', err.message), 'err'); }
-      }),
+    h('div', { class: 'field' }, langSel,
       h('div', { class: 'hint' }, t('Сохраняется в config.ini и действует на всех устройствах.'))));
   const device = h('div', { class: 'panel form' },
     !touch ? null : h('div', { class: 'field' }, h('span', { class: 'label' }, t('Камера при добавлении краски')),
