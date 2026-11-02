@@ -131,8 +131,8 @@ No build step and no external libraries — plain HTML, CSS and JavaScript in `p
 | PATCH / DELETE | `/api/manufacturers/{id}` | rename; delete only works when no paints use it |
 | GET / POST | `/api/storages` | list (with paint and pot counts) / add storages |
 | GET / PATCH / DELETE | `/api/storages/{id}` | settings include `is_default` and `copies_storage_id` (storage suggested for duplicates); deleting keeps the pots, without a storage (the default one can't be deleted) |
-| GET / POST | `/api/tags` | list / add tags |
-| PATCH / DELETE | `/api/tags/{id}` | |
+| GET / POST | `/api/tags` | list / add tags; a tag has a name per interface language in `names` (`name` is the Russian one); a new tag gets the same name in every language unless `names` says otherwise |
+| PATCH / DELETE | `/api/tags/{id}` | `{"name": …, "lang": "en"}` renames in one language, `name` alone — in all |
 | GET | `/api/recognize` | whether photo recognition is installed |
 | POST | `/api/recognize` | send a photo as the body (`Content-Type: image/jpeg`); returns label text, barcodes, form suggestions and matching paints; `?barcode_only=true` skips text (for live camera frames) |
 | PUT | `/api/settings/language` | `{"language": "auto" \| "ru" \| "en"}` — saved into `config.ini` |

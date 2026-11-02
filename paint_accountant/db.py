@@ -254,6 +254,10 @@ MIGRATIONS: list[str] = [
         FROM (VALUES ('accent')) v
         JOIN tag t ON py_lower(t.name) = 'проливка';
     """,
+    # 14 — a tag has a name in every interface language (tag_name); tag.name goes away.
+    #      Both languages start with the old name; the starter tags get their English names
+    #      (unless the user already has a tag called so). Built below, after TAG_NAMES_EN.
+    None,
 ]
 
 # Starter tags: (name, plaque color, label keywords)
@@ -271,10 +275,8 @@ STARTER_TAGS: list[tuple[str, str, list[str]]] = [
 ]
 
 
-# Starter names are created in Russian and stay so in the database (old migrations find tags by
-# these names). An English interface and the English CSV show them translated; a tag the user
-# renamed or created is shown as typed. Keep in sync with BUILTIN_EN in web/i18n.js.
-BUILTIN_EN: dict[str, str] = {
+# English names of the starter tags, used once by migration 14 when tags got a name per language.
+TAG_NAMES_EN: dict[str, str] = {
     "Грунт": "Primer",
     "Основа": "Base",
     "Слой": "Layer",
@@ -286,13 +288,46 @@ BUILTIN_EN: dict[str, str] = {
     "Лак": "Varnish",
     "Для аэрографа": "Airbrush",
     "Техническая": "Technical",
-    "Под рукой": "At hand",
 }
+
+# The default "at hand" storage is created in Russian; in English it is shown translated while
+# it keeps that name. Keep in sync with BUILTIN_EN in web/i18n.js.
+STORAGE_NAMES_EN: dict[str, str] = {"Под рукой": "At hand"}
+
+
+def _sql(text: str) -> str:
+    return "'" + text.replace("'", "''") + "'"
+
+
+MIGRATIONS[13] = """
+    CREATE TABLE tag_name (
+        tag_id INTEGER NOT NULL REFERENCES tag (id) ON DELETE CASCADE,
+        lang   TEXT    NOT NULL,
+        name   TEXT    NOT NULL,
+        PRIMARY KEY (tag_id, lang)
+    );
+    CREATE UNIQUE INDEX tag_name_lang_uq ON tag_name (lang, name COLLATE NOCASE);
+    INSERT INTO tag_name (tag_id, lang, name) SELECT id, 'ru', name FROM tag;
+    INSERT INTO tag_name (tag_id, lang, name) SELECT id, 'en', name FROM tag;
+""" + "".join(f"""
+    UPDATE tag_name SET name = {_sql(en)}
+        WHERE lang = 'en' AND name = {_sql(ru)}
+          AND NOT EXISTS (SELECT 1 FROM tag_name x WHERE x.lang = 'en' AND py_lower(x.name) = py_lower({_sql(en)}));
+""" for ru, en in TAG_NAMES_EN.items()) + """
+    CREATE TABLE tag_new (
+        id    INTEGER PRIMARY KEY,
+        color TEXT NOT NULL DEFAULT '#888888'
+              CHECK (color GLOB '#[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]')
+    );
+    INSERT INTO tag_new (id, color) SELECT id, color FROM tag;
+    DROP TABLE tag;
+    ALTER TABLE tag_new RENAME TO tag;
+"""
 
 
 def builtin_name(name: str, lang: str) -> str:
-    """A starter tag or storage name in the given language; any other name as it is."""
-    return BUILTIN_EN.get(name, name) if lang == "en" else name
+    """The starter storage name in the given language; any other name as it is."""
+    return STORAGE_NAMES_EN.get(name, name) if lang == "en" else name
 
 
 def connect(db_path: Path) -> sqlite3.Connection:

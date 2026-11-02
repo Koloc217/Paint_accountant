@@ -442,7 +442,7 @@ def test_tamiya_by_item_number_with_glued_title(conn):
     assert s["manufacturer"]["name"] == "Tamiya"
     assert s["code"] == "87131"
     assert s["name"] == "Panel Line Accent Color (Black)"
-    wash = conn.execute("SELECT id FROM tag WHERE name = 'Проливка'").fetchone()[0]
+    wash = conn.execute("SELECT tag_id FROM tag_name WHERE lang = 'ru' AND name = 'Проливка'").fetchone()[0]
     assert wash in s["tag_ids"]
 
 
