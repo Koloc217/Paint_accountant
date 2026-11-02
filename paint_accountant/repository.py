@@ -229,9 +229,29 @@ def delete_storage(conn: sqlite3.Connection, storage_id: int) -> None:
 
 # ======================= tags =======================
 
+# Interface languages. A tag has a name in each; "name" in answers is the Russian one,
+# "names" has all of them (the page shows the one for its language).
+LANGS = ("ru", "en")
+
+
+def _tag_names(conn: sqlite3.Connection) -> dict[int, dict[str, str]]:
+    names: dict[int, dict[str, str]] = {}
+    for r in conn.execute("SELECT tag_id, lang, name FROM tag_name"):
+        names.setdefault(r["tag_id"], {})[r["lang"]] = r["name"]
+    return names
+
+
+def _with_names(tag: dict, names: dict[int, dict[str, str]]) -> dict:
+    own = names.get(tag["id"], {})
+    tag["names"] = {lang: own.get(lang) or next(iter(own.values()), "") for lang in LANGS}
+    tag["name"] = tag["names"][LANGS[0]]
+    return tag
+
+
 def list_tags(conn: sqlite3.Connection) -> list[dict]:
-    tags = [dict(r) for r in conn.execute(
-        """SELECT t.id, t.name, t.color, count(pt.paint_id) AS paint_count
+    names = _tag_names(conn)
+    tags = [_with_names(dict(r), names) for r in conn.execute(
+        """SELECT t.id, t.color, count(pt.paint_id) AS paint_count
            FROM tag t LEFT JOIN paint_tag pt ON pt.tag_id = t.id
            GROUP BY t.id ORDER BY t.id"""
     )]
@@ -251,36 +271,53 @@ def get_tag(conn: sqlite3.Connection, tag_id: int) -> dict:
     raise NotFound(f"tag {tag_id} not found")
 
 
-def _check_tag_name_free(conn: sqlite3.Connection, name: str, exclude_id: int | None = None) -> None:
+def _check_tag_name_free(conn: sqlite3.Connection, lang: str, name: str, exclude_id: int | None = None) -> None:
     row = conn.execute(
-        "SELECT id FROM tag WHERE py_lower(name) = py_lower(?) AND id IS NOT ?",
-        (name, exclude_id),
+        "SELECT tag_id FROM tag_name WHERE lang = ? AND py_lower(name) = py_lower(?) AND tag_id IS NOT ?",
+        (lang, name, exclude_id),
     ).fetchone()
     if row:
         raise Conflict(f"tag named '{name}' already exists")
 
 
+def _set_tag_names(conn: sqlite3.Connection, tag_id: int, names: dict[str, str]) -> None:
+    for lang, name in names.items():
+        _check_tag_name_free(conn, lang, name, exclude_id=tag_id)
+    conn.executemany(
+        "INSERT INTO tag_name (tag_id, lang, name) VALUES (?, ?, ?) "
+        "ON CONFLICT (tag_id, lang) DO UPDATE SET name = excluded.name",
+        [(tag_id, lang, name) for lang, name in names.items()],
+    )
+
+
+def _clean_names(names: dict | None) -> dict[str, str]:
+    return {lang: v.strip() for lang, v in (names or {}).items() if lang in LANGS and v and v.strip()}
+
+
 def create_tag(conn: sqlite3.Connection, data: dict) -> dict:
+    """A new tag gets the same name in every language, unless "names" gives some of them."""
     name = data["name"].strip()
+    given = _clean_names(data.get("names"))
     with conn:
-        _check_tag_name_free(conn, name)
-        tag_id = conn.execute(
-            "INSERT INTO tag (name, color) VALUES (?, ?)", (name, data["color"])
-        ).lastrowid
+        tag_id = conn.execute("INSERT INTO tag (color) VALUES (?)", (data["color"],)).lastrowid
+        _set_tag_names(conn, tag_id, {lang: given.get(lang, name) for lang in LANGS})
     return get_tag(conn, tag_id)
 
 
 def update_tag(conn: sqlite3.Connection, tag_id: int, changes: dict) -> dict:
+    """"name" with "lang" renames the tag in that language; "name" alone — in every language;
+    "names" sets several at once."""
     get_tag(conn, tag_id)
-    changes = {k: v for k, v in changes.items() if v is not None}
-    if "name" in changes:
-        changes["name"] = changes["name"].strip()
-    if changes:
-        with conn:
-            if "name" in changes:
-                _check_tag_name_free(conn, changes["name"], exclude_id=tag_id)
-            sets = ", ".join(f"{col} = ?" for col in changes)
-            conn.execute(f"UPDATE tag SET {sets} WHERE id = ?", [*changes.values(), tag_id])
+    names = _clean_names(changes.get("names"))
+    name = (changes.get("name") or "").strip()
+    if name:
+        lang = changes.get("lang")
+        names.update({lang: name} if lang in LANGS else {lg: name for lg in LANGS})
+    with conn:
+        if names:
+            _set_tag_names(conn, tag_id, names)
+        if changes.get("color"):
+            conn.execute("UPDATE tag SET color = ? WHERE id = ?", (changes["color"], tag_id))
     return get_tag(conn, tag_id)
 
 
@@ -446,13 +483,14 @@ def _assemble_paints(conn: sqlite3.Connection, rows: list[sqlite3.Row]) -> list[
     ids = [r["id"] for r in rows]
     placeholders = ",".join("?" * len(ids))
     tags: dict[int, list[dict]] = {}
+    names = _tag_names(conn)
     for r in conn.execute(
-        f"""SELECT pt.paint_id, t.id, t.name, t.color
+        f"""SELECT pt.paint_id, t.id, t.color
             FROM paint_tag pt JOIN tag t ON t.id = pt.tag_id
             WHERE pt.paint_id IN ({placeholders}) ORDER BY t.id""",
         ids,
     ):
-        tags.setdefault(r["paint_id"], []).append({"id": r["id"], "name": r["name"], "color": r["color"]})
+        tags.setdefault(r["paint_id"], []).append(_with_names({"id": r["id"], "color": r["color"]}, names))
     locations = _locations(conn, ids)
 
     result = []

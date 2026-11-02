@@ -60,7 +60,7 @@ def paints_csv(conn: sqlite3.Connection, lang: str = "ru") -> bytes:
         )
         writer.writerow([
             p["manufacturer"], p["name"], p["code"] or "", p["hex"] or "", p["quantity"],
-            where, ", ".join(builtin_name(tg["name"], lang) for tg in p["tags"]), p["barcode"] or "",
+            where, ", ".join(tg["names"].get(lang) or tg["name"] for tg in p["tags"]), p["barcode"] or "",
         ])
     return ("﻿" + buf.getvalue()).encode("utf-8")
 

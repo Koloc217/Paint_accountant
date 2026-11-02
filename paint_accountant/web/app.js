@@ -2249,12 +2249,16 @@ function tagsSection(tags) {
     });
     const name = editableName(tg, {
       label: t('Название тега'), maxlength: 50,
-      save: v => api('PATCH', `/tags/${tg.id}`, { name: v }),
+      save: v => api('PATCH', `/tags/${tg.id}`, { name: v, lang: LANG }), // only in this language
     });
+    // the name in the other language: a new tag gets the same one, it can be changed there
+    const other = LANGS.filter(([code]) => code !== LANG)
+      .map(([code, label]) => `${label}: ${(tg.names && tg.names[code]) || tg.name}`).join(' · ');
+    const sub = [other, tg.keywords.length ? t('на этикетке: ') + tg.keywords.join(', ') : ''].filter(Boolean).join(' · ');
     return catRow({
       lead: color,
       name,
-      sub: tg.keywords.length ? t('на этикетке: ') + tg.keywords.join(', ') : null,
+      sub: sub || null,
       count: tg.paint_count,
       onOpen: () => showPaintsOf('tag', tg.id),
       actions: h('div', { class: 'cat-actions' },

@@ -111,7 +111,7 @@ def test_technical_tag_added_once_with_keywords(tmp_path):
     db.init_db(path)
     db.init_db(path)
     conn = db.connect(path)
-    rows = conn.execute("SELECT id FROM tag WHERE name = 'Техническая'").fetchall()
+    rows = conn.execute("SELECT tag_id FROM tag_name WHERE lang = 'ru' AND name = 'Техническая'").fetchall()
     assert len(rows) == 1
     kws = {r[0] for r in conn.execute("SELECT keyword FROM tag_keyword WHERE tag_id = ?", (rows[0][0],))}
     assert {"medium", "thinner", "retarder"} <= kws
@@ -130,7 +130,7 @@ def test_technical_tag_not_duplicated_if_user_made_one(tmp_path):
     conn.close()
     db.init_db(path)
     conn = db.connect(path)
-    assert conn.execute("SELECT count(*) FROM tag WHERE lower(name) LIKE '%ическая'").fetchone()[0] == 1
+    assert conn.execute("SELECT count(*) FROM tag_name WHERE lang = 'ru' AND lower(name) LIKE '%ическая'").fetchone()[0] == 1
     conn.close()
 
 

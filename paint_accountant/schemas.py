@@ -85,8 +85,14 @@ class Storage(BaseModel):
 
 # ---------- tags ----------
 
+TagNames = dict[Literal["ru", "en"], str]
+
+
 class TagIn(BaseModel):
+    """The name goes to every interface language; "names" can give some of them differently."""
+
     name: str = Field(min_length=1, max_length=50)
+    names: TagNames | None = None
     color: str = "#888888"
 
     @field_validator("color")
@@ -96,7 +102,11 @@ class TagIn(BaseModel):
 
 
 class TagPatch(BaseModel):
+    """name + lang renames the tag in that language; name alone — in every language."""
+
     name: str | None = Field(default=None, min_length=1, max_length=50)
+    lang: Literal["ru", "en"] | None = None
+    names: TagNames | None = None
     color: str | None = None
 
     @field_validator("color")
@@ -107,7 +117,8 @@ class TagPatch(BaseModel):
 
 class Tag(BaseModel):
     id: int
-    name: str
+    name: str = Field(description="the Russian name; all of them are in names")
+    names: dict[str, str] = {}
     color: str
     keywords: list[str] = []
     paint_count: int = 0
@@ -199,6 +210,7 @@ class Location(BaseModel):
 class TagRef(BaseModel):
     id: int
     name: str
+    names: dict[str, str] = {}
     color: str
 
 
