@@ -1113,7 +1113,11 @@ function photoRecognizer({ status, fill }) {
       const blob = await shrinkImage(file);
       const res = await fetch('/api/recognize', { method: 'POST', headers: { 'Content-Type': blob.type || 'image/jpeg' }, body: blob });
       const data = await res.json().catch(() => null);
-      if (!res.ok) throw new ApiError(res.status, (data && data.detail) || t('Ошибка {0}', res.status));
+      if (!res.ok) {
+        const d = data && data.detail;
+        if (res.status === 401 && d && d.code === 'auth_required') goToLogin();
+        throw new ApiError(res.status, (typeof d === 'string' ? d : d && d.message) || t('Ошибка {0}', res.status));
+      }
       show(data);
     } catch (err) {
       if (!(err instanceof ApiError)) console.error(err);
@@ -1477,7 +1481,11 @@ function qrImg(link, cls = 'qr') {
 }
 
 const LABEL_SIZES = [['s', t('3 см')], ['m', t('4 см')], ['l', t('5,5 см')]];
-const getLabelSize = () => { try { return localStorage.getItem('pa.labelSize') || 'm'; } catch { return 'm'; } };
+const getLabelSize = () => {
+  let size = null;
+  try { size = localStorage.getItem('pa.labelSize'); } catch { /* storage blocked */ }
+  return LABEL_SIZES.some(([k]) => k === size) ? size : 'm';  // a value from an older version -> default
+};
 
 // the same geometry as the printed sheet (style.css): QR side in mm for each size
 const LABEL_QR_MM = { s: 22, m: 30, l: 44 };

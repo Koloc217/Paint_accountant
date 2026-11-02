@@ -190,9 +190,17 @@ def update_storage(conn: sqlite3.Connection, storage_id: int, changes: dict) -> 
             _check_storage_name_free(conn, changes["name"], exclude_id=storage_id)
         if "copies_storage_id" in changes:
             _check_copies_target(conn, storage_id, changes["copies_storage_id"])
+        # null means "leave as is"; the default storage can only be moved to another one
+        # (is_default=true there), never cleared, or new pots would have nowhere to go
+        if changes.get("at_hand") is None:
+            changes.pop("at_hand", None)
+        if not changes.get("is_default"):
+            changes.pop("is_default", None)
         for flag in ("at_hand", "is_default"):
             if flag in changes:
                 changes[flag] = int(bool(changes[flag]))
+        if not changes:
+            return get_storage(conn, storage_id)
         if changes.get("is_default"):
             conn.execute("UPDATE storage SET is_default = 0 WHERE is_default = 1 AND id != ?", (storage_id,))
         sets = ", ".join(f"{col} = ?" for col in changes)
