@@ -723,6 +723,75 @@ def move_pots(conn: sqlite3.Connection, paint_id: int, from_storage_id: int | No
     }
 
 
+# ---------- several paints at once ----------
+
+ALL = object()  # bulk move: take pots from every storage
+
+
+def bulk_paints(conn: sqlite3.Connection, paint_ids: list[int], action: str, *,
+                to_storage_id: int | None = None, from_storage_id: Any = ALL,
+                tag_ids: list[int] | None = None) -> dict:
+    """One change for many paints, all or nothing.
+
+    move: every pot of each paint (or only those in from_storage_id) goes to to_storage_id
+    (None = without storage); no copies prompt, as with a single move.
+    add_tags / remove_tags: the given tags are put on / taken off each paint.
+    Returns how many paints really changed and the paints as they are now."""
+    ids = sorted(set(paint_ids))
+    if not ids:
+        raise InvalidReference("no paints given")
+    marks = ",".join("?" * len(ids))
+    found = {r[0] for r in conn.execute(f"SELECT id FROM paint WHERE id IN ({marks})", ids)}
+    missing = [i for i in ids if i not in found]
+    if missing:
+        raise NotFound(f"paints not found: {missing}")
+
+    changed: set[int] = set()
+    with conn:
+        if action == "move":
+            _check_refs(conn, to_storage_id, None)
+            if from_storage_id is not ALL:
+                if from_storage_id == to_storage_id:
+                    raise InvalidReference("from and to are the same")
+                _check_refs(conn, from_storage_id, None)
+            for pid in ids:
+                rows = conn.execute(
+                    "SELECT storage_id, quantity FROM paint_location WHERE paint_id = ? AND storage_id IS NOT ?",
+                    (pid, to_storage_id),
+                ).fetchall()
+                if from_storage_id is not ALL:
+                    rows = [r for r in rows if r["storage_id"] == from_storage_id]
+                total = sum(r["quantity"] for r in rows)
+                if not total:
+                    continue
+                for r in rows:
+                    _change(conn, pid, r["storage_id"], -r["quantity"])
+                _change(conn, pid, to_storage_id, +total)
+                changed.add(pid)
+        elif action in ("add_tags", "remove_tags"):
+            tags = sorted(set(tag_ids or []))
+            if not tags:
+                raise InvalidReference("no tags given")
+            _check_refs(conn, None, tags)
+            pairs = [(pid, tg) for pid in ids for tg in tags]
+            for pid, tg in pairs:
+                if action == "add_tags":
+                    cur = conn.execute("INSERT OR IGNORE INTO paint_tag (paint_id, tag_id) VALUES (?, ?)", (pid, tg))
+                else:
+                    cur = conn.execute("DELETE FROM paint_tag WHERE paint_id = ? AND tag_id = ?", (pid, tg))
+                if cur.rowcount:
+                    changed.add(pid)
+        else:
+            raise InvalidReference(f"unknown action {action!r}")
+        if changed:
+            done = sorted(changed)
+            conn.execute(
+                f"UPDATE paint SET updated_at = datetime('now') WHERE id IN ({','.join('?' * len(done))})", done
+            )
+    rows = conn.execute(_PAINT_SELECT + f" WHERE p.id IN ({marks}) ORDER BY p.id", ids).fetchall()
+    return {"changed": len(changed), "paints": _assemble_paints(conn, rows)}
+
+
 # ---------- create / update / delete ----------
 
 def create_paint(conn: sqlite3.Connection, data: dict, storage_id: Any = AUTO,

@@ -219,3 +219,47 @@ def test_sort(client):
     assert order(sort="qty_asc") == [a["id"], c["id"], b["id"]]
     assert order(sort="new")[0] == c["id"]                            # same second -> newest id first
     assert client.get("/api/paints", params={"sort": "hex"}).status_code == 422
+
+
+def test_bulk_move_and_tags(client):
+    box = client.post("/api/storages", json={"name": "Коробка 1"}).json()
+    box2 = client.post("/api/storages", json={"name": "Коробка 2"}).json()
+    tags = {t["name"]: t["id"] for t in client.get("/api/tags").json()}
+    a = _paint(client, name="Nuln Oil", quantity=2, storage_id=box["id"])
+    b = _paint(client, name="Agrax Earthshade", storage_id=None)
+    client.post(f"/api/paints/{b['id']}/add", json={"storage_id": box2["id"]})
+    c = _paint(client, name="Abaddon Black", quantity=0)
+
+    bulk = lambda **body: client.post("/api/paints/bulk", json=body)  # noqa: E731
+    locs = lambda p: {(l["storage"] or {}).get("id"): l["quantity"] for l in p["locations"]}  # noqa: E731
+
+    # everything to box 1: b gathers its two pots there, a is already there, c has no pots
+    r = bulk(paint_ids=[a["id"], b["id"], c["id"]], action="move", to_storage_id=box["id"])
+    assert r.status_code == 200, r.text
+    got = {p["id"]: p for p in r.json()["paints"]}
+    assert r.json()["changed"] == 1
+    assert locs(got[a["id"]]) == {box["id"]: 2} and locs(got[b["id"]]) == {box["id"]: 2} and locs(got[c["id"]]) == {}
+
+    # only what is in box 1 goes to "without storage"
+    client.post(f"/api/paints/{a['id']}/add", json={"storage_id": box2["id"]})
+    r = bulk(paint_ids=[a["id"]], action="move", from_storage_id=box["id"], to_storage_id=None)
+    assert locs(r.json()["paints"][0]) == {None: 2, box2["id"]: 1}
+    assert bulk(paint_ids=[a["id"]], action="move", from_storage_id=box["id"], to_storage_id=box["id"]).status_code == 422
+
+    # tags: added once, the second time nothing changes; removed only where present
+    wash = tags["Проливка"]
+    r = bulk(paint_ids=[a["id"], b["id"]], action="add_tags", tag_ids=[wash])
+    assert r.json()["changed"] == 2
+    assert bulk(paint_ids=[a["id"], b["id"]], action="add_tags", tag_ids=[wash]).json()["changed"] == 0
+    r = bulk(paint_ids=[a["id"], c["id"]], action="remove_tags", tag_ids=[wash])
+    assert r.json()["changed"] == 1
+    tagged = {p["id"]: [t["id"] for t in p["tags"]] for p in client.get("/api/paints").json()}
+    assert tagged[a["id"]] == [] and tagged[b["id"]] == [wash]
+
+    # bad input changes nothing
+    assert bulk(paint_ids=[a["id"], 9999], action="add_tags", tag_ids=[wash]).status_code == 404
+    assert client.get(f"/api/paints/{a['id']}").json()["tags"] == []
+    assert bulk(paint_ids=[a["id"]], action="add_tags", tag_ids=[9999]).status_code == 422
+    assert bulk(paint_ids=[a["id"]], action="add_tags").status_code == 422
+    assert bulk(paint_ids=[a["id"]], action="move", to_storage_id=9999).status_code == 422
+    assert bulk(paint_ids=[], action="move").status_code == 422

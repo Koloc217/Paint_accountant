@@ -16,6 +16,8 @@ from .db import connect
 from .netinfo import lan_url
 from .config import save_language
 from .schemas import (
+    BulkIn,
+    BulkResult,
     LanguageIn,
     Manufacturer,
     ManufacturerIn,
@@ -182,6 +184,19 @@ def move_pots(paint_id: int, body: MoveIn, conn: sqlite3.Connection = Conn):
     """Move pots from one storage to another (null = without a storage)."""
     try:
         return repo.move_pots(conn, paint_id, body.from_storage_id, body.to_storage_id, body.count)
+    except _DOMAIN_ERRORS as exc:
+        raise _translate(exc)
+
+
+@router.post("/paints/bulk", response_model=BulkResult, tags=["paints"])
+def bulk_paints(body: BulkIn, conn: sqlite3.Connection = Conn):
+    """Change several paints at once: move all their pots to a storage, or add / remove tags.
+    Everything is done in one transaction; `changed` tells how many paints actually changed."""
+    kw: dict = {"to_storage_id": body.to_storage_id, "tag_ids": body.tag_ids}
+    if "from_storage_id" in body.model_fields_set:
+        kw["from_storage_id"] = body.from_storage_id
+    try:
+        return repo.bulk_paints(conn, body.paint_ids, body.action, **kw)
     except _DOMAIN_ERRORS as exc:
         raise _translate(exc)
 
