@@ -497,7 +497,37 @@ function goBack(fallback = '#/') {
 
 // ======================= paints list =======================
 
-const newFilters = () => ({ q: '', storage: '', maker: '', tags: new Set(), atHand: false, stock: '', sort: 'maker' });
+const SORTS = ['maker', 'name', 'qty_desc', 'qty_asc', 'new'];
+
+/** "Remember the sort order" on this device: off by default. */
+function rememberSort(set) {
+  try {
+    if (set !== undefined) {
+      localStorage.setItem('pa.rememberSort', set ? '1' : '0');
+      if (!set) localStorage.removeItem('pa.sort');
+    }
+    return localStorage.getItem('pa.rememberSort') === '1';
+  } catch {
+    return Boolean(set);
+  }
+}
+
+function savedSort() {
+  if (!rememberSort()) return 'maker';
+  try {
+    const s = localStorage.getItem('pa.sort');
+    return SORTS.includes(s) ? s : 'maker';
+  } catch {
+    return 'maker';
+  }
+}
+
+function saveSort(sort) {
+  if (!rememberSort()) return;
+  try { localStorage.setItem('pa.sort', sort); } catch { /* private mode */ }
+}
+
+const newFilters = () => ({ q: '', storage: '', maker: '', tags: new Set(), atHand: false, stock: '', sort: savedSort() });
 const filters = newFilters();          // the main paint list
 const storageFilters = new Map();      // one set per storage page, kept while you move around
 
@@ -555,7 +585,7 @@ function paintBrowser({ f, storageId = null, tags, storages, makers, emptyText, 
   // in a storage every listed paint has pots there, so "used up" makes no sense
   if (storageId) stockSel.hidden = true;
 
-  const sortSel = h('select', { class: 'input', 'aria-label': t('Сортировка'), onchange: e => { f.sort = e.target.value; refresh(); } },
+  const sortSel = h('select', { class: 'input', 'aria-label': t('Сортировка'), onchange: e => { f.sort = e.target.value; saveSort(f.sort); refresh(); } },
     h('option', { value: 'maker' }, t('По производителю')),
     h('option', { value: 'name' }, t('По названию')),
     h('option', { value: 'qty_desc' }, t('Больше банок')),
@@ -1826,13 +1856,20 @@ async function viewSettings(mount) {
         try { await setLang(code); } catch (err) { toast(t('Не получилось сохранить: {0}', err.message), 'err'); }
       }),
       h('div', { class: 'hint' }, t('Сохраняется в config.ini и действует на всех устройствах.'))));
-  const device = !touch ? null : h('div', { class: 'panel form' },
-    h('div', { class: 'field' }, h('span', { class: 'label' }, t('Камера при добавлении краски')),
+  const device = h('div', { class: 'panel form' },
+    !touch ? null : h('div', { class: 'field' }, h('span', { class: 'label' }, t('Камера при добавлении краски')),
       segButtons(t('Режим камеры'), [['photo', t('Фото')], ['stream', t('Поток + фото')]], cameraMode(), value => {
         cameraMode(value);
         render();
       }),
-      h('div', { class: 'hint' }, t('«Фото» открывает приложение камеры. «Поток» ловит штрихкоды в живом видео, но без HTTPS требует флаг Chrome.'))));
+      h('div', { class: 'hint' }, t('«Фото» открывает приложение камеры. «Поток» ловит штрихкоды в живом видео, но без HTTPS требует флаг Chrome.'))),
+    h('div', { class: 'field' }, h('span', { class: 'label' }, t('Запоминать сортировку')),
+      segButtons(t('Запоминать сортировку'), [['off', t('Нет')], ['on', t('Да')]], rememberSort() ? 'on' : 'off', value => {
+        rememberSort(value === 'on');
+        if (value === 'on') saveSort(filters.sort);
+        render();
+      }),
+      h('div', { class: 'hint' }, t('Выбранная сортировка списка сохранится после перезагрузки страницы.'))));
 
   let signIn;
   if (!state.enabled) {
@@ -1880,7 +1917,7 @@ async function viewSettings(mount) {
     pageHead(t('Настройки')),
     h('h2', null, t('Язык')), language,
     h('h2', null, t('Резервная копия')), backupPanel(),
-    device ? h('h2', null, t('На этом устройстве')) : null, device,
+    h('h2', null, t('На этом устройстве')), device,
     h('h2', null, t('Вход по паролю')), signIn,
     h('p', { class: 'muted small' },
       t('Пароль передаётся по сети без шифрования (http), поэтому не используйте пароль от важных аккаунтов. '),
