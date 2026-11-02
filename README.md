@@ -37,6 +37,15 @@ Paint_accountant/
     └── photos/          uploaded pictures
 ```
 
+### Exporting the list (for a chatbot or for reading)
+
+**Export** above the paint list copies or downloads the listed paints as Markdown, following the current filters (all metallics, one box…):
+
+- **Short — for a chatbot**: paints in stock by manufacturer, one line each — name (code) — hex — tags — with a short header explaining the lines. Paste it into a chatbot and ask whether something you have can replace a paint, or you need to buy it.
+- **Full**: adds a summary of storages, where each paint lies (storage ×pots, ✋ = at hand), barcodes, and the paints that ran out.
+
+API: `GET /api/export/paints.md?level=short|full&lang=ru|en&download=true`, with the same filters as `/api/paints`.
+
 ### Backup and moving to another machine
 
 **⚙ Settings → Backup** has three buttons:

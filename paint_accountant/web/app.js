@@ -717,13 +717,12 @@ function paintBrowser({ f, storageId = null, tags, storages, makers, emptyText, 
     }
     if (current.length && !sel.on) {
       buttons.append(h('button', { type: 'button', onclick: () => selecting(true) }, t('Выбрать')));
+      buttons.append(h('button', { type: 'button', onclick: () => exportDialog(filterParams(), anyFilterIn(f, storageId)) }, t('Выгрузить')));
     }
     summary.append(buttons);
   }
 
-  let seq = 0;
-  async function refresh() {
-    const mySeq = ++seq;
+  function filterParams() {
     const params = new URLSearchParams();
     if (f.q.trim()) params.set('q', f.q.trim());
     if (storageId) params.set('storage_id', storageId);
@@ -733,6 +732,13 @@ function paintBrowser({ f, storageId = null, tags, storages, makers, emptyText, 
     f.tags.forEach(id => params.append('tag_id', id));
     if (f.atHand && !storageId) params.set('at_hand', 'true');
     if (f.stock && !storageId) params.set('in_stock', f.stock === 'in' ? 'true' : 'false');
+    return params;
+  }
+
+  let seq = 0;
+  async function refresh() {
+    const mySeq = ++seq;
+    const params = filterParams();
     if (f.sort && f.sort !== 'maker') params.set('sort', f.sort);
     if (onFabHref) onFabHref(f);
 
@@ -765,6 +771,47 @@ function paintBrowser({ f, storageId = null, tags, storages, makers, emptyText, 
     listBox,
     bar);
   return { el, refresh };
+}
+
+/** Export the listed paints as Markdown: short (for a chatbot) or full; copy or download. */
+async function exportDialog(params, filtered) {
+  const level = (value, title, hint, checked) => h('label', { class: 'export-level' },
+    h('input', { type: 'radio', name: 'export-level', value, checked }),
+    h('span', null, h('b', null, title), h('br'), h('span', { class: 'muted' }, hint)));
+  const form = h('div', { class: 'export-levels' },
+    level('short', t('Кратко — для нейросети'),
+      t('Что есть в наличии: производитель, название, код, цвет, теги. Можно отдать нейросети и спросить, чем заменить нужную краску.'), true),
+    level('full', t('Подробно'),
+      t('Плюс хранилища с количеством банок, штрихкоды, сводка по хранилищам и закончившиеся краски.'), false));
+  const choice = await choiceDialog({
+    title: t('Выгрузить список'),
+    text: filtered ? t('Выгружается то, что выбрано фильтрами.') : '',
+    content: form,
+    buttons: [
+      { label: t('Копировать'), value: 'copy', kind: 'primary' },
+      { label: t('Скачать .md'), value: 'download' },
+      { label: t('Отмена'), value: null },
+    ],
+  });
+  if (!choice) return;
+  const q = new URLSearchParams(params);
+  q.set('level', form.querySelector('input:checked').value);
+  q.set('lang', LANG);
+  if (choice === 'download') {
+    q.set('download', 'true');
+    const a = h('a', { href: '/api/export/paints.md?' + q, download: '' });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    return;
+  }
+  try {
+    const res = await fetch('/api/export/paints.md?' + q);
+    if (!res.ok) throw new Error(res.statusText);
+    toast(await copyText(await res.text()) ? t('Список скопирован') : t('Не получилось скопировать — скачайте файл'), '');
+  } catch (e) {
+    toast(explain(e), 'err');
+  }
 }
 
 async function viewPaints(mount) {

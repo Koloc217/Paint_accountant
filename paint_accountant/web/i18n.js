@@ -28,6 +28,16 @@ function t(text, ...args) {
 
 
 const EN = {
+  "Выгрузить": "Export",
+  "Выгрузить список": "Export the list",
+  "Кратко — для нейросети": "Short — for a chatbot",
+  "Что есть в наличии: производитель, название, код, цвет, теги. Можно отдать нейросети и спросить, чем заменить нужную краску.": "What is in stock: manufacturer, name, code, color, tags. Hand it to a chatbot and ask what could replace the paint you need.",
+  "Подробно": "Full",
+  "Плюс хранилища с количеством банок, штрихкоды, сводка по хранилищам и закончившиеся краски.": "Plus storages with pot counts, barcodes, a storage summary and paints that ran out.",
+  "Выгружается то, что выбрано фильтрами.": "Only what the filters show is exported.",
+  "Скачать .md": "Download .md",
+  "Список скопирован": "List copied",
+  "Не получилось скопировать — скачайте файл": "Couldn't copy — download the file instead",
   "python run.py --restore копия.zip": "python run.py --restore backup.zip",
   "Резервная копия": "Backup",
   "Восстановить из копии…": "Restore from a backup…",
