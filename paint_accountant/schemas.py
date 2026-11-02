@@ -143,7 +143,7 @@ class PaintIn(BaseModel):
     code: str | None = Field(default=None, max_length=50)
     barcode: str | None = Field(default=None, max_length=100)
     hex: str | None = None
-    quantity: int = Field(default=1, ge=0)
+    quantity: int = Field(default=1, ge=0, le=1000)
     storage_id: int | None = Field(
         default=None,
         description="leave out to use the default storage; give an id to put the pots there; null = without a storage",

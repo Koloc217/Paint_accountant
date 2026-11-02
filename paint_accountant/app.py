@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
@@ -34,6 +34,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(router)
     app.include_router(auth_api.router)
     auth_api.install(app)
+
+    @app.exception_handler(OverflowError)
+    async def number_too_large(request: Request, exc: OverflowError) -> JSONResponse:
+        # an id or count beyond SQLite's 64-bit integers (/api/paints/99999999999999999999)
+        return JSONResponse({"detail": "number is too large"}, status_code=422)
     app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 
     @app.get("/", include_in_schema=False)
