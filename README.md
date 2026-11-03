@@ -129,8 +129,8 @@ No build step and no external libraries — plain HTML, CSS and JavaScript in `p
 | POST | `/api/paints/{id}/move` | `{"from_storage_id", "to_storage_id", "count"}` |
 | GET / POST | `/api/manufacturers` | list (with paint counts, `q` to filter) / add manufacturers |
 | PATCH / DELETE | `/api/manufacturers/{id}` | rename; delete only works when no paints use it |
-| GET / POST | `/api/storages` | list (with paint and pot counts) / add storages |
-| GET / PATCH / DELETE | `/api/storages/{id}` | settings include `is_default` and `copies_storage_id` (storage suggested for duplicates); deleting keeps the pots, without a storage (the default one can't be deleted) |
+| GET / POST | `/api/storages` | list (with paint and pot counts) / add storages; names per language work as for tags (below) |
+| GET / PATCH / DELETE | `/api/storages/{id}` | settings include `is_default` and `copies_storage_id` (storage suggested for duplicates); deleting keeps the pots, without a storage (the default one can't be deleted); `{"name": …, "lang": "en"}` renames in one language |
 | GET / POST | `/api/tags` | list / add tags; a tag has a name per interface language in `names` (`name` is the Russian one); a new tag gets the same name in every language unless `names` says otherwise |
 | PATCH / DELETE | `/api/tags/{id}` | `{"name": …, "lang": "en"}` renames in one language, `name` alone — in all |
 | GET | `/api/recognize` | whether photo recognition is installed |

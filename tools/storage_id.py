@@ -24,7 +24,7 @@ from paint_accountant.config import load_settings  # noqa: E402
 
 def renumber(conn: sqlite3.Connection, old: int, new: int) -> bool:
     """Storage `old` gets id `new`; a storage already at `new` gets `old`. True if they swapped."""
-    names = dict(conn.execute("SELECT id, name FROM storage").fetchall())
+    names = dict(conn.execute("SELECT id, (SELECT name FROM storage_name WHERE storage_id = id AND lang = 'ru') FROM storage").fetchall())
     if old not in names:
         raise SystemExit(f"Хранилища №{old} нет")
     swap = new in names
@@ -34,6 +34,7 @@ def renumber(conn: sqlite3.Connection, old: int, new: int) -> bool:
         conn.execute("UPDATE storage SET id = ? WHERE id = ?", (b, a))
         conn.execute("UPDATE storage SET copies_storage_id = ? WHERE copies_storage_id = ?", (b, a))
         conn.execute("UPDATE paint_location SET storage_id = ? WHERE storage_id = ?", (b, a))
+        conn.execute("UPDATE storage_name SET storage_id = ? WHERE storage_id = ?", (b, a))
 
     conn.execute("PRAGMA foreign_keys = OFF")
     with conn:
@@ -55,7 +56,7 @@ def main(argv: list[str]) -> None:
         raise SystemExit(f"Базы нет: {settings.db_path}")
     conn = sqlite3.connect(settings.db_path)
     if not argv:
-        for sid, name in conn.execute("SELECT id, name FROM storage ORDER BY id"):
+        for sid, name in conn.execute("SELECT id, (SELECT name FROM storage_name WHERE storage_id = id AND lang = 'ru') FROM storage ORDER BY id"):
             print(f"{sid:>4}  {name}")
         return
     if len(argv) != 2 or not all(a.isdigit() and int(a) > 0 for a in argv):
@@ -67,7 +68,7 @@ def main(argv: list[str]) -> None:
     conn.close()
     shutil.copy2(settings.db_path, backup)
     conn = sqlite3.connect(settings.db_path)
-    names = dict(conn.execute("SELECT id, name FROM storage").fetchall())
+    names = dict(conn.execute("SELECT id, (SELECT name FROM storage_name WHERE storage_id = id AND lang = 'ru') FROM storage").fetchall())
     swapped = renumber(conn, old, new)
     print(f"«{names[old]}»: №{old} → №{new}")
     if swapped:
