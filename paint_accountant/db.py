@@ -258,6 +258,8 @@ MIGRATIONS: list[str] = [
     #      Both languages start with the old name; the starter tags get their English names
     #      (unless the user already has a tag called so). Built below, after TAG_NAMES_EN.
     None,
+    # 15 — storages get a name per interface language too (storage_name); storage.name goes away.
+    None,
 ]
 
 # Starter tags: (name, plaque color, label keywords)
@@ -290,8 +292,7 @@ TAG_NAMES_EN: dict[str, str] = {
     "Техническая": "Technical",
 }
 
-# The default "at hand" storage is created in Russian; in English it is shown translated while
-# it keeps that name. Keep in sync with BUILTIN_EN in web/i18n.js.
+# English name of the starter "at hand" storage, used once by migration 15.
 STORAGE_NAMES_EN: dict[str, str] = {"Под рукой": "At hand"}
 
 
@@ -322,6 +323,25 @@ MIGRATIONS[13] = """
     INSERT INTO tag_new (id, color) SELECT id, color FROM tag;
     DROP TABLE tag;
     ALTER TABLE tag_new RENAME TO tag;
+"""
+
+MIGRATIONS[14] = """
+    CREATE TABLE storage_name (
+        storage_id INTEGER NOT NULL REFERENCES storage (id) ON DELETE CASCADE,
+        lang       TEXT    NOT NULL,
+        name       TEXT    NOT NULL,
+        PRIMARY KEY (storage_id, lang)
+    );
+    CREATE UNIQUE INDEX storage_name_lang_uq ON storage_name (lang, name COLLATE NOCASE);
+    INSERT INTO storage_name (storage_id, lang, name) SELECT id, 'ru', name FROM storage;
+    INSERT INTO storage_name (storage_id, lang, name) SELECT id, 'en', name FROM storage;
+""" + "".join(f"""
+    UPDATE storage_name SET name = {_sql(en)}
+        WHERE lang = 'en' AND name = {_sql(ru)}
+          AND NOT EXISTS (SELECT 1 FROM storage_name x WHERE x.lang = 'en' AND py_lower(x.name) = py_lower({_sql(en)}));
+""" for ru, en in STORAGE_NAMES_EN.items()) + """
+    DROP INDEX storage_name_uq;
+    ALTER TABLE storage DROP COLUMN name;
 """
 
 

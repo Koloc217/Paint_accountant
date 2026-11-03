@@ -34,10 +34,17 @@ def _strip_or_none(value: str | None) -> str | None:
     return value or None
 
 
+# names of a tag or a storage per interface language
+Names = dict[Literal["ru", "en"], str]
+
+
 # ---------- storages ----------
 
 class StorageIn(BaseModel):
+    """The name goes to every interface language; "names" can give some of them differently."""
+
     name: str = Field(min_length=1, max_length=100)
+    names: Names | None = None
     nfc_tag: str | None = None
     at_hand: bool = False
     is_default: bool = False
@@ -56,9 +63,12 @@ class StorageIn(BaseModel):
 
 class StoragePatch(BaseModel):
     """Only sent fields change. is_default=true makes this the default storage
-    (the previous default stops being one). copies_storage_id=null turns the copies rule off."""
+    (the previous default stops being one). copies_storage_id=null turns the copies rule off.
+    name + lang renames the storage in that language; name alone — in every language."""
 
     name: str | None = Field(default=None, min_length=1, max_length=100)
+    lang: Literal["ru", "en"] | None = None
+    names: Names | None = None
     nfc_tag: str | None = None
     at_hand: bool | None = None
     is_default: bool | None = None
@@ -70,11 +80,13 @@ class StoragePatch(BaseModel):
 class StorageName(BaseModel):
     id: int
     name: str
+    names: dict[str, str] = {}
 
 
 class Storage(BaseModel):
     id: int
-    name: str
+    name: str = Field(description="the Russian name; all of them are in names")
+    names: dict[str, str] = {}
     nfc_tag: str | None
     at_hand: bool
     is_default: bool = False
@@ -85,14 +97,11 @@ class Storage(BaseModel):
 
 # ---------- tags ----------
 
-TagNames = dict[Literal["ru", "en"], str]
-
-
 class TagIn(BaseModel):
     """The name goes to every interface language; "names" can give some of them differently."""
 
     name: str = Field(min_length=1, max_length=50)
-    names: TagNames | None = None
+    names: Names | None = None
     color: str = "#888888"
 
     @field_validator("color")
@@ -106,7 +115,7 @@ class TagPatch(BaseModel):
 
     name: str | None = Field(default=None, min_length=1, max_length=50)
     lang: Literal["ru", "en"] | None = None
-    names: TagNames | None = None
+    names: Names | None = None
     color: str | None = None
 
     @field_validator("color")
@@ -198,6 +207,7 @@ class PaintPatch(BaseModel):
 class StorageRef(BaseModel):
     id: int
     name: str
+    names: dict[str, str] = {}
     at_hand: bool
     is_default: bool = False
 

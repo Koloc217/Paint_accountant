@@ -29,7 +29,7 @@ from pathlib import Path, PurePosixPath
 from . import __version__
 from . import repository as repo
 from .config import Settings
-from .db import MIGRATIONS, builtin_name, connect, init_db
+from .db import MIGRATIONS, connect, init_db
 
 DB_NAME = "paints.sqlite3"
 MANIFEST = "manifest.json"
@@ -55,7 +55,7 @@ def paints_csv(conn: sqlite3.Connection, lang: str = "ru") -> bytes:
     writer.writerow(CSV_HEADERS[lang])
     for p in paints:
         where = ", ".join(
-            f"{builtin_name(loc['storage']['name'], lang) if loc['storage'] else NO_STORAGE[lang]} ×{loc['quantity']}"
+            f"{loc['storage']['names'].get(lang) or loc['storage']['name'] if loc['storage'] else NO_STORAGE[lang]} ×{loc['quantity']}"
             for loc in p["locations"] if loc["quantity"]
         )
         writer.writerow([

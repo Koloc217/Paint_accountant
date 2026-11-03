@@ -92,7 +92,7 @@ def test_v3_to_v4_moves_pots_into_locations_and_picks_default(tmp_path):
     locs = {tuple(r) for r in conn.execute("SELECT paint_id, storage_id, quantity FROM paint_location")}
     assert locs == {(1, 1, 3), (2, 2, 1), (4, None, 2)}  # used-up paint has no pots anywhere
     # the existing "at hand" storage became the default, no extra one was created
-    storages = [tuple(r) for r in conn.execute("SELECT id, name, at_hand, is_default FROM storage ORDER BY id")]
+    storages = [tuple(r) for r in conn.execute("SELECT id, (SELECT name FROM storage_name WHERE storage_id = storage.id AND lang = 'ru'), at_hand, is_default FROM storage ORDER BY id")]
     assert storages == [(1, "Коробка 1", 0, 0), (2, "Ящик у стола", 1, 1)]
     assert conn.execute("SELECT barcode FROM paint WHERE id = 1").fetchone()[0] == "501"
     conn.close()
@@ -102,7 +102,7 @@ def test_fresh_database_has_default_at_hand_storage(tmp_path):
     path = tmp_path / "paints.sqlite3"
     db.init_db(path)
     conn = db.connect(path)
-    assert [tuple(r) for r in conn.execute("SELECT name, at_hand, is_default FROM storage")] == [("Под рукой", 1, 1)]
+    assert [tuple(r) for r in conn.execute("SELECT (SELECT name FROM storage_name WHERE storage_id = storage.id AND lang = 'ru'), at_hand, is_default FROM storage")] == [("Под рукой", 1, 1)]
     conn.close()
 
 

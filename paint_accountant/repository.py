@@ -95,27 +95,85 @@ def set_setting(conn: sqlite3.Connection, key: str, value: str | None) -> None:
                      "ON CONFLICT (key) DO UPDATE SET value = excluded.value", (key, value))
 
 
+# ======================= names per language =======================
+
+# Interface languages. Tags and storages have a name in each; "name" in answers is the
+# Russian one, "names" has all of them (the page shows the one for its language).
+LANGS = ("ru", "en")
+
+# the Russian name of a storage in SQL: for sorting and for code that needs one name
+STORAGE_RU = "(SELECT sn.name FROM storage_name sn WHERE sn.storage_id = {0}.id AND sn.lang = 'ru')"
+
+
+def _names_of(conn: sqlite3.Connection, table: str, key: str) -> dict[int, dict[str, str]]:
+    names: dict[int, dict[str, str]] = {}
+    for r in conn.execute(f"SELECT {key} AS id, lang, name FROM {table}"):
+        names.setdefault(r["id"], {})[r["lang"]] = r["name"]
+    return names
+
+
+def _with_names(item: dict, names: dict[int, dict[str, str]]) -> dict:
+    own = names.get(item["id"], {})
+    item["names"] = {lang: own.get(lang) or next(iter(own.values()), "") for lang in LANGS}
+    item["name"] = item["names"][LANGS[0]]
+    return item
+
+
+def _clean_names(names: dict | None) -> dict[str, str]:
+    return {lang: v.strip() for lang, v in (names or {}).items() if lang in LANGS and v and v.strip()}
+
+
+def _names_change(changes: dict) -> dict[str, str]:
+    """"name" + "lang" -> that language; "name" alone -> every language; plus "names"."""
+    names = _clean_names(changes.get("names"))
+    name = (changes.get("name") or "").strip()
+    if name:
+        lang = changes.get("lang")
+        names.update({lang: name} if lang in LANGS else {lg: name for lg in LANGS})
+    return names
+
+
+def _set_names(conn: sqlite3.Connection, table: str, key: str, item_id: int, names: dict[str, str],
+               what: str) -> None:
+    for lang, name in names.items():
+        row = conn.execute(
+            f"SELECT {key} FROM {table} WHERE lang = ? AND py_lower(name) = py_lower(?) AND {key} IS NOT ?",
+            (lang, name, item_id),
+        ).fetchone()
+        if row:
+            raise Conflict(f"{what} named '{name}' already exists")
+    conn.executemany(
+        f"INSERT INTO {table} ({key}, lang, name) VALUES (?, ?, ?) "
+        f"ON CONFLICT ({key}, lang) DO UPDATE SET name = excluded.name",
+        [(item_id, lang, name) for lang, name in names.items()],
+    )
+
+
+def _storage_names(conn: sqlite3.Connection) -> dict[int, dict[str, str]]:
+    return _names_of(conn, "storage_name", "storage_id")
+
+
+def _tag_names(conn: sqlite3.Connection) -> dict[int, dict[str, str]]:
+    return _names_of(conn, "tag_name", "tag_id")
+
+
 # ======================= storages =======================
 
 _STORAGE_SELECT = """
-    SELECT s.id, s.name, s.nfc_tag, s.at_hand, s.is_default, s.copies_storage_id,
-           c.name                          AS copies_storage_name,
+    SELECT s.id, s.nfc_tag, s.at_hand, s.is_default, s.copies_storage_id,
            count(l.paint_id)               AS paint_count,
            coalesce(sum(l.quantity), 0)    AS pot_count
     FROM storage s
-    LEFT JOIN storage c ON c.id = s.copies_storage_id
     LEFT JOIN paint_location l ON l.storage_id = s.id
 """
 
 
-def _storage_row(row: sqlite3.Row) -> dict[str, Any]:
-    d = dict(row)
+def _storage_row(row: sqlite3.Row, names: dict[int, dict[str, str]]) -> dict[str, Any]:
+    d = _with_names(dict(row), names)
     d["at_hand"] = bool(d["at_hand"])
     d["is_default"] = bool(d["is_default"])
-    d["copies_storage"] = (
-        {"id": d["copies_storage_id"], "name": d["copies_storage_name"]} if d["copies_storage_id"] else None
-    )
-    del d["copies_storage_name"]
+    cid = d["copies_storage_id"]
+    d["copies_storage"] = _with_names({"id": cid}, names) if cid else None
     return d
 
 
@@ -125,29 +183,21 @@ def list_storages(conn: sqlite3.Connection, at_hand: bool | None = None) -> list
     if at_hand is not None:
         sql += " WHERE s.at_hand = ?"
         params.append(int(at_hand))
-    sql += " GROUP BY s.id ORDER BY s.is_default DESC, s.at_hand DESC, py_lower(s.name)"
-    return _set_unique_counts([_storage_row(r) for r in conn.execute(sql, params)], conn, _STORAGE_PAINTS)
+    sql += f" GROUP BY s.id ORDER BY s.is_default DESC, s.at_hand DESC, py_lower({STORAGE_RU.format('s')})"
+    names = _storage_names(conn)
+    return _set_unique_counts([_storage_row(r, names) for r in conn.execute(sql, params)], conn, _STORAGE_PAINTS)
 
 
 def get_storage(conn: sqlite3.Connection, storage_id: int) -> dict:
     row = conn.execute(_STORAGE_SELECT + " WHERE s.id = ? GROUP BY s.id", (storage_id,)).fetchone()
     if row is None:
         raise NotFound(f"storage {storage_id} not found")
-    return _set_unique_counts([_storage_row(row)], conn, _STORAGE_PAINTS)[0]
+    return _set_unique_counts([_storage_row(row, _storage_names(conn))], conn, _STORAGE_PAINTS)[0]
 
 
 def default_storage_id(conn: sqlite3.Connection) -> int | None:
     row = conn.execute("SELECT id FROM storage WHERE is_default = 1").fetchone()
     return row["id"] if row else None
-
-
-def _check_storage_name_free(conn: sqlite3.Connection, name: str, exclude_id: int | None = None) -> None:
-    row = conn.execute(
-        "SELECT id FROM storage WHERE py_lower(name) = py_lower(?) AND id IS NOT ?",
-        (name, exclude_id),
-    ).fetchone()
-    if row:
-        raise Conflict(f"storage named '{name}' already exists")
 
 
 def _check_copies_target(conn: sqlite3.Connection, storage_id: int | None, copies_id: int | None) -> None:
@@ -160,34 +210,38 @@ def _check_copies_target(conn: sqlite3.Connection, storage_id: int | None, copie
 
 
 def create_storage(conn: sqlite3.Connection, data: dict) -> dict:
+    """A new storage gets the same name in every language, unless "names" gives some of them."""
+    name = data["name"].strip()
+    given = _clean_names(data.get("names"))
     with conn:
-        _check_storage_name_free(conn, data["name"])
         _check_copies_target(conn, None, data.get("copies_storage_id"))
         if data.get("is_default"):
             conn.execute("UPDATE storage SET is_default = 0 WHERE is_default = 1")
         storage_id = conn.execute(
-            "INSERT INTO storage (name, nfc_tag, at_hand, is_default, copies_storage_id) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO storage (nfc_tag, at_hand, is_default, copies_storage_id) VALUES (?, ?, ?, ?)",
             (
-                data["name"],
                 data.get("nfc_tag"),
                 int(data.get("at_hand", False)),
                 int(bool(data.get("is_default"))),
                 data.get("copies_storage_id"),
             ),
         ).lastrowid
+        _set_names(conn, "storage_name", "storage_id", storage_id,
+                   {lang: given.get(lang, name) for lang in LANGS}, "storage")
     return get_storage(conn, storage_id)
 
 
 def update_storage(conn: sqlite3.Connection, storage_id: int, changes: dict) -> dict:
+    """"name" with "lang" renames the storage in that language; "name" alone — in every language."""
     get_storage(conn, storage_id)
-    if not changes:
-        return get_storage(conn, storage_id)
+    if "name" in changes and (changes["name"] is None or not changes["name"].strip()):
+        raise InvalidReference("name must not be empty")
+    names = _names_change(changes)
+    for key in ("name", "lang", "names"):
+        changes.pop(key, None)
     with conn:
-        if "name" in changes:
-            if changes["name"] is None or not changes["name"].strip():
-                raise InvalidReference("name must not be empty")
-            changes["name"] = changes["name"].strip()
-            _check_storage_name_free(conn, changes["name"], exclude_id=storage_id)
+        if names:
+            _set_names(conn, "storage_name", "storage_id", storage_id, names, "storage")
         if "copies_storage_id" in changes:
             _check_copies_target(conn, storage_id, changes["copies_storage_id"])
         # null means "leave as is"; the default storage can only be moved to another one
@@ -229,25 +283,6 @@ def delete_storage(conn: sqlite3.Connection, storage_id: int) -> None:
 
 # ======================= tags =======================
 
-# Interface languages. A tag has a name in each; "name" in answers is the Russian one,
-# "names" has all of them (the page shows the one for its language).
-LANGS = ("ru", "en")
-
-
-def _tag_names(conn: sqlite3.Connection) -> dict[int, dict[str, str]]:
-    names: dict[int, dict[str, str]] = {}
-    for r in conn.execute("SELECT tag_id, lang, name FROM tag_name"):
-        names.setdefault(r["tag_id"], {})[r["lang"]] = r["name"]
-    return names
-
-
-def _with_names(tag: dict, names: dict[int, dict[str, str]]) -> dict:
-    own = names.get(tag["id"], {})
-    tag["names"] = {lang: own.get(lang) or next(iter(own.values()), "") for lang in LANGS}
-    tag["name"] = tag["names"][LANGS[0]]
-    return tag
-
-
 def list_tags(conn: sqlite3.Connection) -> list[dict]:
     names = _tag_names(conn)
     tags = [_with_names(dict(r), names) for r in conn.execute(
@@ -271,27 +306,8 @@ def get_tag(conn: sqlite3.Connection, tag_id: int) -> dict:
     raise NotFound(f"tag {tag_id} not found")
 
 
-def _check_tag_name_free(conn: sqlite3.Connection, lang: str, name: str, exclude_id: int | None = None) -> None:
-    row = conn.execute(
-        "SELECT tag_id FROM tag_name WHERE lang = ? AND py_lower(name) = py_lower(?) AND tag_id IS NOT ?",
-        (lang, name, exclude_id),
-    ).fetchone()
-    if row:
-        raise Conflict(f"tag named '{name}' already exists")
-
-
 def _set_tag_names(conn: sqlite3.Connection, tag_id: int, names: dict[str, str]) -> None:
-    for lang, name in names.items():
-        _check_tag_name_free(conn, lang, name, exclude_id=tag_id)
-    conn.executemany(
-        "INSERT INTO tag_name (tag_id, lang, name) VALUES (?, ?, ?) "
-        "ON CONFLICT (tag_id, lang) DO UPDATE SET name = excluded.name",
-        [(tag_id, lang, name) for lang, name in names.items()],
-    )
-
-
-def _clean_names(names: dict | None) -> dict[str, str]:
-    return {lang: v.strip() for lang, v in (names or {}).items() if lang in LANGS and v and v.strip()}
+    _set_names(conn, "tag_name", "tag_id", tag_id, names, "tag")
 
 
 def create_tag(conn: sqlite3.Connection, data: dict) -> dict:
@@ -308,11 +324,7 @@ def update_tag(conn: sqlite3.Connection, tag_id: int, changes: dict) -> dict:
     """"name" with "lang" renames the tag in that language; "name" alone — in every language;
     "names" sets several at once."""
     get_tag(conn, tag_id)
-    names = _clean_names(changes.get("names"))
-    name = (changes.get("name") or "").strip()
-    if name:
-        lang = changes.get("lang")
-        names.update({lang: name} if lang in LANGS else {lg: name for lg in LANGS})
+    names = _names_change(changes)
     with conn:
         if names:
             _set_tag_names(conn, tag_id, names)
@@ -463,16 +475,18 @@ def _set_tags(conn: sqlite3.Connection, paint_id: int, tag_ids: Iterable[int]) -
 def _locations(conn: sqlite3.Connection, paint_ids: list[int]) -> dict[int, list[dict]]:
     placeholders = ",".join("?" * len(paint_ids))
     result: dict[int, list[dict]] = {}
+    names = _storage_names(conn)
     for r in conn.execute(
-        f"""SELECT l.paint_id, l.quantity, s.id, s.name, s.at_hand, s.is_default
+        f"""SELECT l.paint_id, l.quantity, s.id, s.at_hand, s.is_default
             FROM paint_location l LEFT JOIN storage s ON s.id = l.storage_id
             WHERE l.paint_id IN ({placeholders})
-            ORDER BY s.id IS NULL, s.is_default DESC, s.at_hand DESC, py_lower(s.name)""",
+            ORDER BY s.id IS NULL, s.is_default DESC, s.at_hand DESC, py_lower({STORAGE_RU.format('s')})""",
         paint_ids,
     ):
         storage = None
         if r["id"] is not None:
-            storage = {"id": r["id"], "name": r["name"], "at_hand": bool(r["at_hand"]), "is_default": bool(r["is_default"])}
+            storage = _with_names({"id": r["id"], "at_hand": bool(r["at_hand"]), "is_default": bool(r["is_default"])},
+                                  names)
         result.setdefault(r["paint_id"], []).append({"storage": storage, "quantity": r["quantity"]})
     return result
 
@@ -645,8 +659,8 @@ def _change(conn: sqlite3.Connection, paint_id: int, storage_id: int | None, del
 def _storage_brief(conn: sqlite3.Connection, storage_id: int | None) -> dict | None:
     if storage_id is None:
         return None
-    r = conn.execute("SELECT id, name, at_hand FROM storage WHERE id = ?", (storage_id,)).fetchone()
-    return {"id": r["id"], "name": r["name"], "at_hand": bool(r["at_hand"])}
+    r = conn.execute("SELECT id, at_hand FROM storage WHERE id = ?", (storage_id,)).fetchone()
+    return _with_names({"id": r["id"], "at_hand": bool(r["at_hand"])}, _storage_names(conn))
 
 
 def _add_pots(conn: sqlite3.Connection, paint_id: int, count: int, target: Any = AUTO,

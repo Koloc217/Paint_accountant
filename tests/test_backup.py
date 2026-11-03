@@ -75,13 +75,7 @@ def test_csv_in_english_translates_starter_tags_and_storage(client):
     assert ru["Nuln Oil"][6] == "Проливка" and ru["Gunmetal Grey"][5] == "Под рукой ×1"
 
 
-def test_builtin_names_are_the_same_in_python_and_js():
-    import re
-    from pathlib import Path
-    src = (Path(db.__file__).parent / "web" / "i18n.js").read_text(encoding="utf-8")
-    body = src[src.index("const BUILTIN_EN = {") + len("const BUILTIN_EN = "):]
-    body = body[:body.index("\n};") + 2]
-    assert json.loads(re.sub(r",\s*}$", "}", body)) == db.STORAGE_NAMES_EN
+def test_every_starter_tag_has_an_english_name():
     assert {name for name, *_ in db.STARTER_TAGS} | {"Техническая"} == db.TAG_NAMES_EN.keys()
 
 

@@ -1565,7 +1565,9 @@ async function viewStorage(mount, id) {
     storages.filter(x => x.id !== s.id).map(x => h('option', { value: String(x.id) }, x.name)));
   copies.value = s.copies_storage ? String(s.copies_storage.id) : '';
   const settings = h('form', { class: 'form' },
-    h('div', { class: 'field' }, h('label', { for: 's-name' }, t('Название')), nameInput),
+    h('div', { class: 'field' }, h('label', { for: 's-name' }, t('Название')), nameInput,
+      h('div', { class: 'hint' }, LANGS.filter(([code]) => code !== LANG)
+        .map(([code, label]) => `${label}: ${(s.names && s.names[code]) || s.name}`).join(' · '))),
     h('div', { class: 'field' }, h('label', { for: 's-tag' }, t('Метка (необязательно)')), tagInput,
       h('div', { class: 'hint' }, t('Любая пометка для себя: номер или ID NFC-метки, цвет наклейки…'))),
     h('label', { class: 'check' }, atHand, t('Под рукой')),
@@ -1589,7 +1591,7 @@ async function viewStorage(mount, id) {
     e.preventDefault();
     try {
       const body = {
-        name: nameInput.value.trim(), nfc_tag: tagInput.value.trim() || null, at_hand: atHand.checked,
+        name: nameInput.value.trim(), lang: LANG, nfc_tag: tagInput.value.trim() || null, at_hand: atHand.checked,
         copies_storage_id: copies.value ? Number(copies.value) : null,
       };
       if (isDefault.checked && !s.is_default) body.is_default = true;
@@ -1641,7 +1643,7 @@ function storageHead(s) {
       const v = input.value.trim();
       if (!ok || !v || v === s.name) { show(); return; }
       try {
-        await api('PATCH', `/storages/${s.id}`, { name: v });
+        await api('PATCH', `/storages/${s.id}`, { name: v, lang: LANG }); // only in this language
         toast(t('Сохранено'), 'ok');
         render();
       } catch (err) {

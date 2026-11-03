@@ -26,19 +26,12 @@ function t(text, ...args) {
   return args.length ? s.replace(/\{(\d+)\}/g, (m, i) => (args[i] === undefined ? m : String(args[i]))) : s;
 }
 
-// The default "at hand" storage is created in Russian; in English it is shown translated.
-// Keep in sync with STORAGE_NAMES_EN in db.py.
-const BUILTIN_EN = {
-  "Под рукой": "At hand",
-};
-
-/** Names in the page's language anywhere in an API answer: a tag's name from its "names",
- *  the starter storage's from BUILTIN_EN. */
+/** Names in the page's language anywhere in an API answer: tags and storages carry
+ *  "names" ({ru, en}), and "name" becomes the one for this page. */
 function localizeBuiltins(data) {
   if (data === null || typeof data !== 'object') return data;
   if (Array.isArray(data)) { data.forEach(localizeBuiltins); return data; }
   if (data.names && typeof data.names === 'object' && data.names[LANG]) data.name = data.names[LANG];
-  else if (LANG === 'en' && typeof data.name === 'string' && BUILTIN_EN[data.name]) data.name = BUILTIN_EN[data.name];
   for (const [key, value] of Object.entries(data)) {
     if (key !== 'names' && value && typeof value === 'object') localizeBuiltins(value);
   }

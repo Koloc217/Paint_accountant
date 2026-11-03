@@ -1,4 +1,4 @@
-"""A tag is one id with a name in every interface language."""
+"""Tags and storages: one id with a name in every interface language."""
 
 from __future__ import annotations
 
@@ -80,4 +80,58 @@ def test_migration_keeps_ids_and_does_not_steal_a_users_name(tmp_path):
     assert conn.execute("SELECT tag_id FROM paint_tag").fetchone()[0] == before["Проливка"]
     cols = [r[1] for r in conn.execute("PRAGMA table_info(tag)")]
     assert cols == ["id", "color"]
+    conn.close()
+
+
+# ---------------- storages work the same way ----------------
+
+def storage(client, ru_name):
+    return next(s for s in client.get("/api/storages").json() if s["names"]["ru"] == ru_name)
+
+
+def test_default_storage_has_an_english_name(client):
+    assert storage(client, "Под рукой")["names"] == {"ru": "Под рукой", "en": "At hand"}
+
+
+def test_storage_rename_in_one_language(client):
+    box = client.post("/api/storages", json={"name": "Коробка 1"}).json()
+    assert box["names"] == {"ru": "Коробка 1", "en": "Коробка 1"}
+    r = client.patch(f"/api/storages/{box['id']}", json={"name": "Box 1", "lang": "en"})
+    assert r.json()["names"] == {"ru": "Коробка 1", "en": "Box 1"}
+    assert client.patch(f"/api/storages/{box['id']}", json={"name": "At hand", "lang": "en"}).status_code == 409
+    assert client.post("/api/storages", json={"name": "коробка 1"}).status_code == 409
+
+
+def test_paint_locations_and_csv_use_storage_names(client):
+    box = client.post("/api/storages", json={"name": "Коробка 1"}).json()
+    client.patch(f"/api/storages/{box['id']}", json={"name": "Box 1", "lang": "en"})
+    p = client.post("/api/paints", json={"name": "Nuln Oil", "manufacturer": "Citadel", "storage_id": box["id"]}).json()
+    assert p["locations"][0]["storage"]["names"] == {"ru": "Коробка 1", "en": "Box 1"}
+    csv_en = client.get("/api/backup/paints.csv?lang=en").content.decode("utf-8-sig")
+    assert "Box 1 ×1" in csv_en
+    csv_ru = client.get("/api/backup/paints.csv?lang=ru").content.decode("utf-8-sig")
+    assert "Коробка 1 ×1" in csv_ru
+
+
+def test_storage_migration_keeps_ids(tmp_path):
+    path = tmp_path / "paints.sqlite3"
+    conn = db.connect(path)
+    for n, script in enumerate(db.MIGRATIONS[:14], start=1):
+        conn.executescript(f"BEGIN; {script} PRAGMA user_version = {n}; COMMIT;")
+        if n == 1:
+            db._seed_tags(conn)
+    with conn:
+        box = conn.execute("INSERT INTO storage (name) VALUES ('Коробка 1')").lastrowid
+        hand = conn.execute("SELECT id FROM storage WHERE name = 'Под рукой'").fetchone()[0]
+    conn.close()
+
+    db.init_db(path)
+
+    conn = db.connect(path)
+    names = {}
+    for r in conn.execute("SELECT storage_id, lang, name FROM storage_name"):
+        names.setdefault(r[0], {})[r[1]] = r[2]
+    assert names[hand] == {"ru": "Под рукой", "en": "At hand"}
+    assert names[box] == {"ru": "Коробка 1", "en": "Коробка 1"}
+    assert "name" not in [r[1] for r in conn.execute("PRAGMA table_info(storage)")]
     conn.close()

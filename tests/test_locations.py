@@ -23,7 +23,8 @@ def st(client):
     reserve = client.post("/api/storages", json={"name": "Запас"}).json()
     box = client.post("/api/storages", json={"name": "Коробка 1"}).json()
     r = client.patch(f"/api/storages/{hand['id']}", json={"copies_storage_id": reserve["id"]})
-    assert r.json()["copies_storage"] == {"id": reserve["id"], "name": "Запас"}
+    assert r.json()["copies_storage"]["id"] == reserve["id"]
+    assert r.json()["copies_storage"]["name"] == "Запас"
     return {"hand": hand["id"], "reserve": reserve["id"], "box": box["id"]}
 
 
@@ -51,7 +52,8 @@ def test_second_pot_at_hand_needs_confirmation(client, st):
 
     d = dup(client.post(f"/api/paints/{p['id']}/add"))
     assert d["storage"]["name"] == "Под рукой" and d["have"] == 1
-    assert d["suggest"] == {"id": st["reserve"], "name": "Запас", "at_hand": False}
+    assert d["suggest"] == {"id": st["reserve"], "name": "Запас", "at_hand": False,
+                            "names": {"ru": "Запас", "en": "Запас"}}
     assert where(client.get(f"/api/paints/{p['id']}").json()) == {"Под рукой": 1}  # nothing changed
 
     r = client.post(f"/api/paints/{p['id']}/add", json={"allow_duplicate": True}).json()
