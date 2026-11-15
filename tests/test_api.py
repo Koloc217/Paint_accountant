@@ -280,3 +280,24 @@ def test_duplicate_paint_tells_which_paint_exists_so_pots_can_go_to_another_stor
     assert added.status_code == 200
     assert {loc["storage"]["id"]: loc["quantity"] for loc in added.json()["paint"]["locations"]} == {
         box["id"]: 1, stand["id"]: 1}
+
+
+def test_merge_paints_moves_pots_tags_and_picks_barcode(client):
+    box = client.post("/api/storages", json={"name": "Коробка 1"}).json()
+    stand = client.post("/api/storages", json={"name": "Тумба"}).json()
+    tag = client.get("/api/tags").json()[0]
+    old = client.post("/api/paints", json={"name": "Doombull Brown", "manufacturer": "Citadel", "code": "LAYER",
+                                           "barcode": "111", "storage_id": box["id"]}).json()
+    new = client.post("/api/paints", json={"name": "Doombull Brown", "manufacturer": "Citadel",
+                                           "barcode": "222", "tag_ids": [tag["id"]],
+                                           "storage_id": stand["id"], "quantity": 2}).json()
+    r = client.post(f"/api/paints/{old['id']}/merge", json={"from_id": new["id"], "barcode": "from"})
+    assert r.status_code == 200, r.text
+    merged = r.json()
+    assert merged["id"] == old["id"] and merged["barcode"] == "222" and merged["code"] == "LAYER"
+    assert merged["quantity"] == 3 and [t["id"] for t in merged["tags"]] == [tag["id"]]
+    assert {loc["storage"]["id"]: loc["quantity"] for loc in merged["locations"]} == {box["id"]: 1, stand["id"]: 2}
+    assert client.get(f"/api/paints?q=Doombull").json()[0]["id"] == old["id"]
+    assert len(client.get("/api/paints?q=Doombull").json()) == 1
+    assert client.post(f"/api/paints/{old['id']}/merge", json={"from_id": old["id"]}).status_code == 422
+    assert client.post(f"/api/paints/{old['id']}/merge", json={"from_id": 9999}).status_code == 404

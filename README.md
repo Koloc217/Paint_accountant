@@ -127,6 +127,7 @@ No build step and no external libraries — plain HTML, CSS and JavaScript in `p
 | POST | `/api/paints/{id}/add` | add pots: `{"count": 1}` to the default storage, `{"storage_id": N}` there; a second pot in an "at hand" storage needs `"allow_duplicate": true`, else 409 `duplicate_at_hand` with a suggested storage |
 | POST | `/api/paints/{id}/remove` | a pot is used up: from "at hand" first, or from `storage_id` |
 | POST | `/api/paints/{id}/move` | `{"from_storage_id", "to_storage_id", "count"}` |
+| POST | `/api/paints/{id}/merge` | fold a duplicate into this paint: `{"from_id": N, "barcode": "keep"\|"from"}` — its pots and tags move here, the duplicate is deleted (with its uuid) |
 | GET / POST | `/api/manufacturers` | list (with paint counts, `q` to filter) / add manufacturers |
 | PATCH / DELETE | `/api/manufacturers/{id}` | rename; delete only works when no paints use it |
 | GET / POST | `/api/storages` | list (with paint and pot counts) / add storages; names per language work as for tags (below) |

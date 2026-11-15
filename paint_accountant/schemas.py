@@ -258,6 +258,11 @@ class PotsIn(BaseModel):
     )
 
 
+class MergeIn(BaseModel):
+    from_id: int = Field(description="the duplicate: its pots and tags move to this paint, then it is deleted")
+    barcode: Literal["keep", "from"] = Field("keep", description="which barcode stays on the merged paint")
+
+
 class MoveIn(BaseModel):
     from_storage_id: int | None
     to_storage_id: int | None
