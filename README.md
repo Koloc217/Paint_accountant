@@ -56,7 +56,7 @@ API: `GET /api/export/paints.md?level=short|full&lang=ru|en&download=true`, with
 
 The same from the console: `python run.py --dump [file.zip]` and `python run.py --restore file.zip`. Copying the `data/` folder while the app is stopped works too.
 
-Autostart (systemd on Linux / Raspberry Pi, Task Scheduler on Windows) and moving step by step: [docs/autostart.md](docs/autostart.md) (in Russian).
+Autostart (systemd on Linux, Task Scheduler on Windows) and moving to another computer, step by step: [docs/autostart.md](docs/autostart.md).
 
 
 To change a storage's number in its link (`/#/storage/2` → `/#/storage/1`, e.g. to match an NFC tag you already wrote), stop the app and run `python tools/storage_id.py` to list storages, then `python tools/storage_id.py 2 1`. If the number is taken, the two storages swap; pots and settings follow. A copy of the database is saved first.

@@ -1,24 +1,24 @@
-# Автозапуск и перенос на другой компьютер
+# Autostart and moving to another computer
 
-Приложение запускается командой `python run.py` из своей папки. Чтобы оно стартовало
-само после включения компьютера, ниже есть рецепты для Linux (systemd, подходит и для
-Raspberry Pi) и для Windows (Планировщик заданий). Это необязательная часть: если
-запускать вручную, ничего настраивать не нужно.
+The app is started with `python run.py` from its own folder. To make it start by itself
+when the computer boots, there are recipes below for Linux (systemd) and Windows
+(Task Scheduler). This part is optional: if you start the app by hand, nothing needs
+to be set up.
 
-В примерах приложение лежит в `~/Paint_accountant` (Linux) или `C:\Paint_accountant`
-(Windows), и в нём создано окружение `.venv`, как в README → Quick start. Если пути
-другие, подставьте свои.
+In the examples the app lives in `~/Paint_accountant` (Linux) or `C:\Paint_accountant`
+(Windows) and has a `.venv` environment, as in README → Quick start. If your paths are
+different, substitute your own.
 
-Сначала убедитесь, что ручной запуск работает: `.venv/bin/python run.py`
-(в Windows `.venv\Scripts\python run.py`) и страница открывается в браузере.
+First make sure that starting by hand works: `.venv/bin/python run.py`
+(on Windows `.venv\Scripts\python run.py`) and the page opens in a browser.
 
 ---
 
-## Linux / Raspberry Pi — systemd
+## Linux — systemd
 
-### 1. Файл службы
+### 1. The service file
 
-Создайте `/etc/systemd/system/paint-accountant.service`:
+Create `/etc/systemd/system/paint-accountant.service`:
 
 ```bash
 sudo nano /etc/systemd/system/paint-accountant.service
@@ -31,54 +31,54 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-# пользователь, которому принадлежит папка приложения
-User=pi
-WorkingDirectory=/home/pi/Paint_accountant
-ExecStart=/home/pi/Paint_accountant/.venv/bin/python run.py
+# the user who owns the app folder
+User=youruser
+WorkingDirectory=/home/youruser/Paint_accountant
+ExecStart=/home/youruser/Paint_accountant/.venv/bin/python run.py
 Restart=on-failure
 RestartSec=5
-# вывод print() сразу попадает в журнал
+# print() output goes to the journal right away
 Environment=PYTHONUNBUFFERED=1
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-Замените `pi` и `/home/pi/...` на своего пользователя и путь. Узнать их можно командами
-`whoami` и `pwd`, запущенными в папке приложения.
+Replace `youruser` and `/home/youruser/...` with your own user and path. You can find
+them with `whoami` and `pwd`, run in the app folder.
 
-### 2. Включить
+### 2. Enable it
 
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable --now paint-accountant
 ```
 
-`enable` включает запуск при загрузке, `--now` запускает сразу.
+`enable` makes it start at boot, `--now` starts it right away.
 
-### 3. Проверить и управлять
+### 3. Check and manage
 
 ```bash
-systemctl status paint-accountant          # работает ли, последние строки вывода
-journalctl -u paint-accountant -f          # журнал в реальном времени (Ctrl+C — выйти)
-sudo systemctl restart paint-accountant    # перезапуск, например после обновления
-sudo systemctl stop paint-accountant       # остановить
-sudo systemctl disable paint-accountant    # убрать из автозапуска
+systemctl status paint-accountant          # is it running, last lines of output
+journalctl -u paint-accountant -f          # live log (Ctrl+C to leave)
+sudo systemctl restart paint-accountant    # restart, e.g. after an update
+sudo systemctl stop paint-accountant       # stop
+sudo systemctl disable paint-accountant    # remove from autostart
 ```
 
-### Обновление
+### Updating
 
 ```bash
 cd ~/Paint_accountant
 git pull
-.venv/bin/pip install -r requirements.txt          # если поменялись зависимости
-.venv/bin/pip install -r requirements-photo.txt    # если стоит распознавание по фото
+.venv/bin/pip install -r requirements.txt          # if the dependencies changed
+.venv/bin/pip install -r requirements-photo.txt    # if photo recognition is installed
 sudo systemctl restart paint-accountant
 ```
 
-### Если телефон не открывает страницу
+### If the phone can't open the page
 
-Если включён файрвол `ufw`, откройте порт (по умолчанию 8642):
+If the `ufw` firewall is on, open the port (8642 by default):
 
 ```bash
 sudo ufw allow 8642/tcp
@@ -86,11 +86,11 @@ sudo ufw allow 8642/tcp
 
 ---
 
-## Windows — Планировщик заданий
+## Windows — Task Scheduler
 
-### Вариант A: через PowerShell (быстрее)
+### Option A: PowerShell (faster)
 
-Откройте PowerShell **от имени администратора** и выполните, подставив свой путь:
+Open PowerShell **as administrator** and run this, with your own path:
 
 ```powershell
 $app = "C:\Paint_accountant"
@@ -105,63 +105,63 @@ Register-ScheduledTask -TaskName "Paint Accountant" -Action $action -Trigger $tr
                        -Settings $settings -Principal $principal
 ```
 
-- `pythonw.exe` запускает без чёрного окна консоли.
-- `-AtStartup` вместе с `S4U` означает запуск при включении компьютера, даже если в
-  Windows никто не вошёл. Если нужно запускать только после входа в систему, замените
-  триггер на `New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME` и уберите строку
-  `$principal` и параметр `-Principal`.
-- `-ExecutionTimeLimit 0` снимает ограничение: по умолчанию Windows останавливает
-  задание через 3 дня.
+- `pythonw.exe` runs without a black console window.
+- `-AtStartup` together with `S4U` starts the app when the computer is switched on, even
+  if nobody has logged in to Windows. If you want it to start only after logging in,
+  replace the trigger with `New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME` and
+  remove the `$principal` line and the `-Principal` parameter.
+- `-ExecutionTimeLimit 0` removes the limit: by default Windows stops a task after
+  3 days.
 
-Запустить сразу, не дожидаясь перезагрузки:
+To start it right away, without a reboot:
 
 ```powershell
 Start-ScheduledTask -TaskName "Paint Accountant"
 ```
 
-### Вариант B: мышкой
+### Option B: with the mouse
 
-1. **Пуск → Планировщик заданий → Создать задачу** (именно «Создать задачу», а не
-   «Создать простую задачу»).
-2. **Общие:** имя `Paint Accountant`; отметьте «Выполнять для всех пользователей»
-   (или «Выполнять только для пользователей, вошедших в систему», если нужен запуск
-   после входа).
-3. **Триггеры → Создать:** «При запуске» (или «При входе в систему»).
-4. **Действия → Создать:** «Запуск программы»
-   - Программа: `C:\Paint_accountant\.venv\Scripts\pythonw.exe`
-   - Аргументы: `run.py`
-   - Рабочая папка: `C:\Paint_accountant`
-5. **Условия:** снимите «Запускать только при питании от электросети».
-6. **Параметры:** снимите «Останавливать задачу, выполняемую дольше…»; включите
-   «При сбое перезапускать каждые 1 мин».
-7. OK. Windows может спросить пароль учётной записи.
+1. **Start → Task Scheduler → Create Task…** (exactly "Create Task", not
+   "Create Basic Task").
+2. **General:** name `Paint Accountant`; select "Run whether user is logged on or not"
+   (or "Run only when user is logged on" if you want it to start after logging in).
+3. **Triggers → New…:** "At startup" (or "At log on").
+4. **Actions → New…:** "Start a program"
+   - Program/script: `C:\Paint_accountant\.venv\Scripts\pythonw.exe`
+   - Add arguments: `run.py`
+   - Start in: `C:\Paint_accountant`
+5. **Conditions:** clear "Start the task only if the computer is on AC power".
+6. **Settings:** clear "Stop the task if it runs longer than…"; select
+   "If the task fails, restart every: 1 minute".
+7. OK. Windows may ask for the account password.
 
-### Доступ с телефона: правило брандмауэра
+### Access from a phone: firewall rule
 
-При ручном запуске Windows сама спрашивает, разрешить ли доступ к сети. Задание из
-планировщика работает в фоне, и этого окна не будет, поэтому правило нужно добавить
-один раз в PowerShell от администратора:
+When you start the app by hand, Windows asks by itself whether to allow network access.
+A task from the scheduler runs in the background and that window never appears, so the
+rule has to be added once, in PowerShell as administrator:
 
 ```powershell
 New-NetFirewallRule -DisplayName "Paint Accountant" -Direction Inbound -Protocol TCP -LocalPort 8642 -Action Allow -Profile Private
 ```
 
-`-Profile Private` разрешает доступ только в домашней сети. Сеть Wi‑Fi в Windows должна
-быть помечена как «Частная».
+`-Profile Private` allows access on your home network only. The Wi‑Fi network must be
+marked "Private" in Windows.
 
-### Проверить и управлять
+### Check and manage
 
 ```powershell
-Get-ScheduledTask -TaskName "Paint Accountant" | Get-ScheduledTaskInfo   # последний запуск и результат
+Get-ScheduledTask -TaskName "Paint Accountant" | Get-ScheduledTaskInfo   # last run and result
 Stop-ScheduledTask  -TaskName "Paint Accountant"
 Start-ScheduledTask -TaskName "Paint Accountant"
-Unregister-ScheduledTask -TaskName "Paint Accountant" -Confirm:$false    # убрать из автозапуска
+Unregister-ScheduledTask -TaskName "Paint Accountant" -Confirm:$false    # remove from autostart
 ```
 
-Под `pythonw` вывода не видно. Если страница не открывается, остановите задание и
-запустите вручную через `.venv\Scripts\python run.py`: ошибка появится в консоли.
+Under `pythonw` there is no output to see. If the page doesn't open, stop the task and
+start the app by hand with `.venv\Scripts\python run.py`: the error will show in the
+console.
 
-### Обновление
+### Updating
 
 ```powershell
 Stop-ScheduledTask -TaskName "Paint Accountant"
@@ -173,18 +173,18 @@ Start-ScheduledTask -TaskName "Paint Accountant"
 
 ---
 
-## Перенос каталога на другой компьютер
+## Moving the catalog to another computer
 
-1. На старом компьютере: **⚙ Настройки → Резервная копия → ⬇ Полная копия (.zip)**,
-   или в консоли `python run.py --dump`.
-2. На новом: установите приложение по README, запустите и откройте
-   **⚙ Настройки → Восстановить из копии…**, или в консоли
-   `python run.py --restore paint-accountant-ГГГГ-ММ-ДД.zip`.
+1. On the old computer: **⚙ Settings → Backup → ⬇ Full backup (.zip)**, or in a console
+   `python run.py --dump`.
+2. On the new one: install the app following the README, start it and open
+   **⚙ Settings → Restore from a backup…**, or in a console
+   `python run.py --restore paint-accountant-YYYY-MM-DD.zip`.
 
-В копии лежат все краски, хранилища, теги, производители, фото и пароль входа (если он
-был включён). Текущая база нового компьютера перед заменой сохраняется в папке `data/`
-как `paints.before-restore-<дата>.sqlite3`.
+The backup holds all paints, storages, tags, manufacturers, photos and the login password
+(if one was set). Before replacing, the new computer's current database is saved in the
+`data/` folder as `paints.before-restore-<date>.sqlite3`.
 
-Ссылки в QR-метках содержат адрес компьютера. Если у нового компьютера другой адрес в
-сети, перепечатайте метки (**QR-метки**) или закрепите за ним прежний адрес в
-настройках роутера.
+The links in QR labels contain the computer's address. If the new computer has a different
+address on the network, reprint the labels (**QR labels**) or reserve the old address for
+it in the router settings.
