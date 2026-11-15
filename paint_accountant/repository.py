@@ -20,6 +20,14 @@ class Conflict(Exception):
     pass
 
 
+class PaintExists(Conflict):
+    """A paint with this manufacturer, name and code is already in the catalog."""
+
+    def __init__(self, paint_id: int, message: str):
+        super().__init__(message)
+        self.paint_id = paint_id
+
+
 class InvalidReference(Exception):
     pass
 
@@ -443,9 +451,10 @@ def _check_paint_unique(
         (manufacturer_id, name, code, exclude_id),
     ).fetchone()
     if row:
-        raise Conflict(
+        raise PaintExists(
+            row["id"],
             f"paint '{name}'{' ' + code if code else ''} of this manufacturer already exists "
-            f"(id {row['id']}); change its quantity instead"
+            f"(id {row['id']}); change its quantity instead",
         )
 
 

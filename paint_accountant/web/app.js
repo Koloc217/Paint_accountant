@@ -214,6 +214,8 @@ async function askAboutDuplicate(paintName, detail, count = 1) {
   return null;
 }
 
+const isPaintExists = err => err instanceof ApiError && err.status === 409 && err.detail && err.detail.code === 'paint_exists';
+
 const isDuplicate = err => err instanceof ApiError && err.status === 409 && err.detail && err.detail.code === 'duplicate_at_hand';
 
 /** POST /paints/{id}/add, asking about a duplicate at hand when needed. Resolves null if cancelled. */
@@ -1006,10 +1008,26 @@ async function viewPaintForm(mount, id, prefillStorage = null) {
         try {
           created = await api('POST', '/paints', body);
         } catch (err) {
-          if (!isDuplicate(err)) throw err;
-          const extra = await askAboutDuplicate(body.name, err.detail, body.quantity);
-          if (!extra) return; // cancelled — stay on the form
-          created = await api('POST', '/paints', { ...body, ...extra });
+          if (isPaintExists(err) && body.quantity > 0) {
+            // the paint is already in the catalog (maybe in another storage): offer to add pots to it
+            const where = placement.selectedOptions[0].textContent.replace(' ✋', '').trim();
+            const ok = await confirmDialog({
+              title: t('Такая краска уже есть в каталоге'),
+              text: t('Добавить {0} → {1}?', countPots(body.quantity), where),
+              confirmLabel: t('Добавить'), kind: 'primary',
+            });
+            if (!ok) return; // cancelled — stay on the form
+            const r = await addPots({ id: err.detail.paint_id, name: body.name },
+              { count: body.quantity, storage_id: body.storage_id });
+            if (!r) return; // cancelled in the "at hand" question
+            created = { ...r.paint, notice: r.notice };
+          } else if (!isDuplicate(err)) {
+            throw err;
+          } else {
+            const extra = await askAboutDuplicate(body.name, err.detail, body.quantity);
+            if (!extra) return; // cancelled — stay on the form
+            created = await api('POST', '/paints', { ...body, ...extra });
+          }
         }
         rememberManufacturer(created.manufacturer_id);
         if (created.notice) showNotice(created, created.notice);

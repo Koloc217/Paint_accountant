@@ -69,6 +69,8 @@ const EN = {
   "цвет не задан": "no color set",
   "Удалить": "Delete",
   "Отмена": "Cancel",
+  "Такая краска уже есть в каталоге": "This paint is already in the catalog",
+  "Добавить {0} → {1}?": "Add {0} → {1}?",
   "Другое хранилище": "Another storage",
   " · под рукой": " · at hand",
   "— без хранилища —": "— no storage —",

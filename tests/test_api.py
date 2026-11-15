@@ -263,3 +263,20 @@ def test_bulk_move_and_tags(client):
     assert bulk(paint_ids=[a["id"]], action="add_tags").status_code == 422
     assert bulk(paint_ids=[a["id"]], action="move", to_storage_id=9999).status_code == 422
     assert bulk(paint_ids=[], action="move").status_code == 422
+
+
+def test_duplicate_paint_tells_which_paint_exists_so_pots_can_go_to_another_storage(client):
+    box = client.post("/api/storages", json={"name": "Коробка 1"}).json()
+    stand = client.post("/api/storages", json={"name": "Тумба"}).json()
+    first = client.post("/api/paints", json={"name": "Кровь дракона", "manufacturer": "Кимера",
+                                             "storage_id": box["id"]}).json()
+    r = client.post("/api/paints", json={"name": "кровь дракона", "manufacturer": "кимера",
+                                         "storage_id": stand["id"]})
+    assert r.status_code == 409
+    detail = r.json()["detail"]
+    assert detail["code"] == "paint_exists" and detail["paint_id"] == first["id"]
+    # what the form does next: put the pot into the other storage of the same paint
+    added = client.post(f"/api/paints/{detail['paint_id']}/add", json={"count": 1, "storage_id": stand["id"]})
+    assert added.status_code == 200
+    assert {loc["storage"]["id"]: loc["quantity"] for loc in added.json()["paint"]["locations"]} == {
+        box["id"]: 1, stand["id"]: 1}
