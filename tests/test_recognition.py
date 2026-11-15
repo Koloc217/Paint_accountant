@@ -31,6 +31,9 @@ pytest.importorskip("rapidfuzz")
         ("ak-11001", None, "AK11001"),
         ("WP1101 Matt Black", None, "WP1101"),
         ("XF-1 Flat Black", None, "XF-1"),
+        ("COKUM COPPER SFG-38", None, "SFG-38"),
+        ("TIAMAT ORANGE SFG 06", None, "SFG-06"),
+        ("Inktensity SC-12", None, "SC-12"),
         ("Flat Black", None, None),
     ],
 )
@@ -495,3 +498,26 @@ def test_without_two_anchors_nothing_is_called_background(conn):
              Line(text="XF-1", score=0.95, x=900, y=900, height=20, width=60)]
     r = suggest(conn, Reading(lines=lines))
     assert all(ln["kind"] != "background" for ln in r["lines"])
+
+
+# Scale75 Fantasy & Games: the logo is read as garbage ("SOGAAES") and is the biggest text on the label;
+# the name and the code share the white strip below ("COKUM COPPER SFG-38"). Real OCR output of two photos.
+def _scale75_label(name_and_code, logo="SOGAAES"):
+    return _reading(("AVLAST", 103), (logo, 128), ("ScauRcaio", 41), (name_and_code, 72))
+
+
+@pytest.mark.parametrize("line, name, code", [
+    ("COKUM COPPER SFG-38", "Cokum Copper", "SFG-38"),
+    ("TIAMAT ORANGE SFG-06", "Tiamat Orange", "SFG-06"),
+])
+def test_scale75_fantasy_and_games_name_and_code_on_one_strip(conn, line, name, code):
+    s = suggest(conn, _scale75_label(line))["suggestion"]
+    assert s["manufacturer"]["name"] == "Scale75"  # told by the code, the logo is unreadable
+    assert s["name"] == name
+    assert s["code"] == code
+
+
+def test_scale75_label_finds_paint_already_in_catalog(client, conn):
+    p = client.post("/api/paints", json={"name": "Cokum Copper", "manufacturer": "Scale75", "code": "SFG-38"}).json()
+    r = suggest(conn, _scale75_label("COKUM COPPER SFG-38"))
+    assert [m["paint"]["id"] for m in r["matches"]] == [p["id"]]

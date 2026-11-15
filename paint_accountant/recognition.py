@@ -215,6 +215,8 @@ ALIASES = {
     "premium color": "Vallejo",
     "scale 75": "Scale75",
     "scalecolor": "Scale75",
+    "fantasy games": "Scale75",  # "Fantasy & Games" line; its logo font is rarely read right
+    "fantasy and games": "Scale75",
 }
 
 # product codes: (manufacturer it usually belongs to, pattern, formatter)
@@ -227,13 +229,16 @@ CODE_PATTERNS: list[tuple[str | None, re.Pattern, Any]] = [
     # Tamiya prints the catalogue number as "Item 87131" (also "Item No. 81731")
     ("Tamiya", re.compile(r"\bItem\s?(?:No\.?\s?)?(\d{5})\b", re.I), lambda m: m[1]),
     ("Citadel", re.compile(r"\b(\d{2})\s?-\s?(\d{2})\b"), lambda m: f"{m[1]}-{m[2]}"),
+    # Scale75: Fantasy & Games "SFG-38", Scalecolor "SC-12"; OCR may drop the dash of SFG
+    ("Scale75", re.compile(r"\b(SFG)\s?-?\s?(\d{2,3})\b", re.I), lambda m: f"{m[1].upper()}-{m[2]}"),
+    ("Scale75", re.compile(r"\b(SC)\s?-\s?(\d{2,3})\b", re.I), lambda m: f"{m[1].upper()}-{m[2]}"),
     # Green Stuff World: "1750 - PAINT REVITALIZER"
     ("Green Stuff World", re.compile(r"\b(\d{4,5})\s*[-–]\s*[A-Za-z]"), lambda m: m[1]),
 ]
 
 
 # codes distinctive enough to tell the manufacturer when its name can't be read
-TELLING_CODES = {"Vallejo", "AK", "Army Painter", "Tamiya"}
+TELLING_CODES = {"Vallejo", "AK", "Army Painter", "Tamiya", "Scale75"}
 
 
 def find_code_with_maker(text: str, manufacturer: str | None = None) -> tuple[str | None, str | None]:
@@ -244,6 +249,19 @@ def find_code_with_maker(text: str, manufacturer: str | None = None) -> tuple[st
         if m:
             return fmt(m), maker
     return None, None
+
+
+# these print "NAME CODE" on one strip (Scale75: "COKUM COPPER SFG-38"), below a big decorative logo
+INLINE_NAME_MAKERS = {"Scale75"}
+
+
+def strip_code(text: str, code: str) -> str:
+    """The text without the product code, whatever case or spacing the label used."""
+    for _maker, pattern, fmt in CODE_PATTERNS:
+        for m in pattern.finditer(text):
+            if fmt(m) == code:
+                return " ".join((text[:m.start()] + " " + text[m.end():]).split())
+    return text
 
 
 def find_code(text: str, manufacturer: str | None = None) -> str | None:
@@ -474,6 +492,10 @@ def suggest(conn: sqlite3.Connection, reading: Reading) -> dict[str, Any]:
                   and abs(ln.y - code_line.y) <= 0.5 * max(ln.height, code_line.height)]
         if beside:
             name_line = min(beside, key=lambda ln: ln.x)
+        elif (code_maker in INLINE_NAME_MAKERS or (maker and maker["name"] in INLINE_NAME_MAKERS)) \
+                and len(norm(strip_code(code_line.text, code)).replace(" ", "")) >= 3:
+            # the big text above is the logo ("FANTASY & GAMES" read as "SOGAAES"), the name is beside the code
+            name_line = code_line
     name_parts: list[Line] = []
     if name_line is not None:
         # a long name is often printed on two lines in the same size: "FLAT" / "BLACK",
@@ -504,9 +526,14 @@ def suggest(conn: sqlite3.Connection, reading: Reading) -> dict[str, Any]:
         for ln in name_parts:
             ln.kind = "name"
     vocab = GLUE_WORDS | {w for kw, _ in keywords for w in norm(kw).split() if len(w) >= 3}
-    name = clean_name(" ".join(ln.text for ln in name_parts), vocab) if name_parts else None
-    if name and code:
-        name = " ".join(name.replace(code, "").split()) or name
+    name = None
+    if name_parts:
+        raw = " ".join(ln.text for ln in name_parts)
+        if code:
+            raw = strip_code(raw, code) or raw
+        name = clean_name(raw, vocab)
+        if code:
+            name = " ".join(name.replace(code, "").split()) or name
 
     # --- barcodes and matches with paints already in the catalog
     matches: dict[int, dict] = {}
