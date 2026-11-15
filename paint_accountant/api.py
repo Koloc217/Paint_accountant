@@ -59,6 +59,12 @@ def _translate(exc: Exception) -> HTTPException:
             "have": exc.have,
             "suggest": exc.suggest,
         })
+    if isinstance(exc, repo.PaintExists):
+        return HTTPException(status.HTTP_409_CONFLICT, {
+            "code": "paint_exists",
+            "message": str(exc),
+            "paint_id": exc.paint_id,
+        })
     if isinstance(exc, repo.NotFound):
         return HTTPException(status.HTTP_404_NOT_FOUND, str(exc))
     if isinstance(exc, repo.Conflict):
