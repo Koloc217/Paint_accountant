@@ -521,3 +521,29 @@ def test_scale75_label_finds_paint_already_in_catalog(client, conn):
     p = client.post("/api/paints", json={"name": "Cokum Copper", "manufacturer": "Scale75", "code": "SFG-38"}).json()
     r = suggest(conn, _scale75_label("COKUM COPPER SFG-38"))
     assert [m["paint"]["id"] for m in r["matches"]] == [p["id"]]
+
+
+# ---------- text in other scripts is not looked at ----------
+
+def test_latin_only():
+    from paint_accountant.recognition import latin_only
+
+    assert latin_only("颜料 水性") == ("", True)
+    assert latin_only("ペイント") == ("", True)
+    assert latin_only("Краска") == ("", True)
+    assert latin_only("NULN OIL 油") == ("NULN OIL", False)
+    assert latin_only("Pintura acrílica señal") == ("Pintura acrílica señal", False)
+    assert latin_only("70.863 颜色") == ("70.863", False)
+
+
+def test_hieroglyphs_are_not_taken_for_the_name(conn):
+    # the biggest text on the label is Chinese: it must not become the paint name
+    r = suggest(conn, _reading(("CITADEL", 30), ("暗影黑色颜料", 120), ("NULN OIL", 70), ("24-14", 25)))
+    assert r["suggestion"]["name"] == "Nuln Oil"
+    kinds = {ln["text"]: ln["kind"] for ln in r["lines"]}
+    assert kinds["暗影黑色颜料"] == "noise"
+
+
+def test_mixed_line_keeps_its_latin_part(conn):
+    r = suggest(conn, _reading(("CITADEL", 30), ("NULN OIL 油", 70), ("24-14", 25)))
+    assert r["suggestion"]["name"] == "Nuln Oil"

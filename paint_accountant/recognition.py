@@ -16,6 +16,7 @@ import logging
 import re
 import sqlite3
 import threading
+import unicodedata
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -170,6 +171,26 @@ def _read_text(img) -> list[Line]:
 
 
 # ======================= understanding the text =======================
+
+def latin_only(text: str) -> tuple[str, bool]:
+    """Drop letters of other scripts (hieroglyphs, Cyrillic, Arabic...): labels are read in Latin letters only.
+
+    Returns the text without them and whether the line was made of foreign letters only
+    (then it isn't text we look at at all). Accents ("ñ", "é"), digits and punctuation stay."""
+    kept = []
+    foreign = latin = 0
+    for ch in text:
+        if ch.isalpha():
+            if unicodedata.name(ch, "").startswith("LATIN"):
+                latin += 1
+                kept.append(ch)
+            else:
+                foreign += 1
+                kept.append(" ")
+        else:
+            kept.append(ch)
+    return " ".join("".join(kept).split()), bool(foreign and not latin and not re.search(r"\d", text))
+
 
 def norm(text: str) -> str:
     """Lowercase, letters and digits only, single spaces."""
@@ -437,11 +458,20 @@ def suggest(conn: sqlite3.Connection, reading: Reading) -> dict[str, Any]:
     makers = repo.list_manufacturers(conn)
     keywords = [(r["keyword"], r["tag_id"]) for r in conn.execute("SELECT keyword, tag_id FROM tag_keyword")]
     keyword_set = {kw.lower() for kw, _ in keywords}
-    full_text = " ".join(ln.text for ln in lines)
+
+    # --- text in other scripts ("颜料 水性") is not looked at: a line of it is noise, mixed lines lose it
+    only_foreign = set()
+    for ln in lines:
+        cleaned, foreign = latin_only(ln.text)
+        if foreign:
+            only_foreign.add(id(ln))  # keeps its text so the screen still shows what was seen
+        else:
+            ln.text = cleaned
+    full_text = " ".join(ln.text for ln in lines if id(ln) not in only_foreign)
 
     # --- classify lines
     for ln in lines:
-        if ln.score < 0.5 or len(norm(ln.text)) < 2 or not re.search(r"[A-Za-z]{2}|\d", ln.text):
+        if id(ln) in only_foreign or ln.score < 0.5 or len(norm(ln.text)) < 2 or not re.search(r"[A-Za-z]{2}|\d", ln.text):
             ln.kind = "noise"
 
     maker, maker_lines = _match_manufacturer([ln for ln in lines if ln.kind != "noise"], makers)
