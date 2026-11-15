@@ -21,6 +21,7 @@ from .schemas import (
     LanguageIn,
     Manufacturer,
     ManufacturerIn,
+    MergeIn,
     MoveIn,
     PaintCreated,
     PotsIn,
@@ -190,6 +191,16 @@ def move_pots(paint_id: int, body: MoveIn, conn: sqlite3.Connection = Conn):
     """Move pots from one storage to another (null = without a storage)."""
     try:
         return repo.move_pots(conn, paint_id, body.from_storage_id, body.to_storage_id, body.count)
+    except _DOMAIN_ERRORS as exc:
+        raise _translate(exc)
+
+
+@router.post("/paints/{paint_id}/merge", response_model=Paint, tags=["paints"])
+def merge_paints(paint_id: int, body: MergeIn, conn: sqlite3.Connection = Conn):
+    """Fold a duplicate paint into this one: pots and tags move here, the duplicate is deleted
+    (its uuid goes with it). `barcode` picks which barcode stays."""
+    try:
+        return repo.merge_paints(conn, paint_id, body.from_id, body.barcode)
     except _DOMAIN_ERRORS as exc:
         raise _translate(exc)
 

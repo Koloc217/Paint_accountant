@@ -915,6 +915,40 @@ def update_paint(conn: sqlite3.Connection, paint_id: int, changes: dict) -> dict
     return get_paint(conn, paint_id)
 
 
+def merge_paints(conn: sqlite3.Connection, keep_id: int, from_id: int, barcode: str = "keep") -> dict:
+    """Fold the paint `from_id` into `keep_id`: its pots and tags move over and it disappears.
+
+    The kept paint keeps its name, manufacturer, code and colour; empty code and colour are
+    filled from the other one. `barcode` says which barcode stays: "keep" or "from"
+    (if the kept paint has none, the other one's is taken either way)."""
+    if keep_id == from_id:
+        raise InvalidReference("can't merge a paint with itself")
+    if barcode not in ("keep", "from"):
+        raise InvalidReference("barcode must be 'keep' or 'from'")
+    keep = get_paint(conn, keep_id)
+    other = get_paint(conn, from_id)
+    with conn:
+        for loc in other["locations"]:
+            _change(conn, keep_id, loc["storage"]["id"] if loc["storage"] else None, loc["quantity"])
+        tag_ids = {t["id"] for t in keep["tags"]} | {t["id"] for t in other["tags"]}
+        conn.execute("DELETE FROM paint WHERE id = ?", (from_id,))  # frees its barcode and identity
+        changes: dict[str, Any] = {}
+        wanted = other["barcode"] if (barcode == "from" or not keep["barcode"]) else keep["barcode"]
+        if wanted != keep["barcode"]:
+            changes["barcode"] = wanted
+        if not keep["code"] and other["code"]:
+            changes["code"] = other["code"]
+            _check_paint_unique(conn, keep["manufacturer_id"], keep["name"], other["code"], exclude_id=keep_id)
+        if not keep["hex"] and other["hex"]:
+            changes["hex"] = other["hex"]
+        if changes:
+            sets = ", ".join(f"{col} = ?" for col in changes)
+            conn.execute(f"UPDATE paint SET {sets} WHERE id = ?", [*changes.values(), keep_id])
+        _set_tags(conn, keep_id, tag_ids)
+        conn.execute("UPDATE paint SET updated_at = datetime('now') WHERE id = ?", (keep_id,))
+    return get_paint(conn, keep_id)
+
+
 def delete_paint(conn: sqlite3.Connection, paint_id: int) -> None:
     with conn:
         if conn.execute("DELETE FROM paint WHERE id = ?", (paint_id,)).rowcount == 0:

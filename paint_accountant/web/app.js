@@ -229,6 +229,42 @@ async function addPots(paint, body = {}) {
   }
 }
 
+/** Pick a duplicate of `paint` and fold it into this one. Resolves with the merged paint, or null. */
+async function mergeDialog(paint) {
+  const found = (await api('GET', '/paints?q=' + encodeURIComponent(paint.name)))
+    .filter(x => x.id !== paint.id);
+  if (!found.length) { toast(t('Похожих красок не нашлось'), 'err'); return null; }
+  found.sort((a, b) => (b.manufacturer_id === paint.manufacturer_id) - (a.manufacturer_id === paint.manufacturer_id));
+  const label = x => [x.name, x.manufacturer, x.code || t('без кода'), locationsText(x)].join(' · ');
+  const pick = h('select', { class: 'input', 'aria-label': t('Дубликат') },
+    found.map(x => h('option', { value: String(x.id) }, label(x))));
+  const barcodes = h('div', { class: 'field' });
+  const bsel = h('select', { class: 'input', 'aria-label': t('Какой штрихкод оставить') });
+  const redraw = () => {
+    const other = found.find(x => x.id === Number(pick.value));
+    if (paint.barcode && other.barcode && paint.barcode !== other.barcode) {
+      bsel.replaceChildren(
+        h('option', { value: 'keep' }, t('Этой краски: {0}', paint.barcode)),
+        h('option', { value: 'from' }, t('Дубликата: {0}', other.barcode)));
+      barcodes.replaceChildren(h('span', { class: 'label' }, t('Какой штрихкод оставить')), bsel);
+      barcodes.hidden = false;
+    } else {
+      barcodes.hidden = true; // one or none — nothing to choose
+    }
+  };
+  pick.addEventListener('change', redraw);
+  redraw();
+  const ok = await choiceDialog({
+    title: t('Объединить с дубликатом'),
+    text: t('Банки и теги дубликата перейдут сюда, сам он удалится.'),
+    content: h('div', null, h('div', { class: 'field' }, pick), barcodes),
+    buttons: [{ label: t('Отмена'), value: false }, { label: t('Объединить'), value: true, kind: 'primary' }],
+  });
+  if (ok !== true) return null;
+  return api('POST', `/paints/${paint.id}/merge`,
+    { from_id: Number(pick.value), barcode: barcodes.hidden ? 'keep' : bsel.value });
+}
+
 /** Delete button that asks for confirmation in a modal window. */
 function deleteButton(label, question, onConfirm) {
   const b = h('button', { type: 'button', class: 'btn danger' }, label);
@@ -341,6 +377,9 @@ function paintRow(p, storageId, sel = null) {
     Object.assign(p, np);
     const n = here();
     value.textContent = n;
+    // in several storages: the list only shows the total, pots are changed on the paint's page
+    const spread = !storageId && p.locations.length > 1;
+    minus.hidden = plus.hidden = spread;
     minus.disabled = n === 0;
     row.classList.toggle('out', n === 0);
     const parts = [p.manufacturer, p.code].filter(Boolean);
@@ -1082,6 +1121,14 @@ async function viewPaintForm(mount, id, prefillStorage = null) {
       h('span', { class: 'spacer' }),
       isNew ? h('button', { type: 'submit', class: 'btn', title: t('Добавить и сразу заполнить следующую'), onclick: () => { andAnother = true; } }, t('+ ещё')) : null,
       h('button', { type: 'submit', class: 'btn primary' }, isNew ? t('Добавить') : t('Сохранить')),
+      isNew ? null : h('button', { type: 'button', class: 'btn', title: t('Слить дубликат в эту краску'), onclick: async () => {
+        try {
+          const merged = await mergeDialog(p);
+          if (!merged) return;
+          toast(t('Краски объединены'), 'ok');
+          goBack();
+        } catch (err) { toast(explain(err), 'err'); }
+      } }, t('Объединить')),
       isNew ? null : deleteButton(t('Удалить'), () => ({ title: t('Удалить «{0}»?', name.value.trim() || p.name), text: t('Краска исчезнет из каталога.') }), async () => {
         try {
           await api('DELETE', `/paints/${id}`);
