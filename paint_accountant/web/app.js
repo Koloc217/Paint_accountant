@@ -970,13 +970,15 @@ async function viewPaints(mount) {
 // ======================= paint form =======================
 
 async function viewPaintForm(mount, id, prefillStorage = null) {
-  const [tags, storages, makers, paint, photo] = await Promise.all([
+  const [tags, storages, makers, paint, photo, info] = await Promise.all([
     api('GET', '/tags'),
     api('GET', '/storages'),
     api('GET', '/manufacturers'),
     id ? api('GET', `/paints/${id}`) : Promise.resolve(null),
     id ? Promise.resolve(null) : api('GET', '/recognize').catch(() => null),
+    api('GET', '/info').catch(() => ({})),
   ]);
+  const lookupOn = !!(info.lookup && info.lookup.upcitemdb);
   const isNew = !paint;
   const p = paint || {
     name: '', manufacturer_id: lastManufacturer(makers), code: '', hex: null, tags: [],
@@ -1078,6 +1080,81 @@ async function viewPaintForm(mount, id, prefillStorage = null) {
     chip.setAttribute('aria-pressed', String(on));
   }
 
+  // ---- online lookup of the barcode (UPCitemdb; a setting, the request is made by the server)
+  const lookupBtn = h('button', { type: 'button', class: 'icon-btn lookup-btn', title: t('Найти штрихкод в UPCitemdb'), 'aria-label': t('Найти штрихкод в UPCitemdb') }, '🔎');
+  const lookupBox = h('div', { class: 'panel lookup-box', hidden: true });
+  let lookupTags = [];
+  function proposeMaker(text) {
+    maker.value = NEW;
+    newMakerBox.hidden = false;
+    newMakerInput.value = text;
+    newMakerInput.focus();
+  }
+  function lookupProblem(err) {
+    const c = err instanceof ApiError && err.detail ? err.detail.code : null;
+    if (c === 'lookup_limit') return t('Бесплатные запросы UPCitemdb на сегодня закончились (100 в день)');
+    if (c === 'lookup_too_fast') return t('Слишком часто — UPCitemdb просит подождать минуту');
+    if (c === 'lookup_disabled') return t('Поиск в UPCitemdb выключен в настройках');
+    if (c === 'lookup_bad_barcode') return t('Штрихкод для поиска — 8, 12, 13 или 14 цифр');
+    if (c === 'lookup_unreachable' || c === 'lookup_config') return t('Нет связи с UPCitemdb: {0}', err.message);
+    return explain(err);
+  }
+  /** Ask UPCitemdb about the barcode (the one given, or the one in the field) and fill empty fields. */
+  async function lookupOnline(scanned) {
+    if (scanned && !barcode.value.trim()) barcode.value = scanned;
+    const value = (scanned || barcode.value).trim();
+    if (!value) { barcode.focus(); toast(t('Сначала введите или отсканируйте штрихкод'), 'warn'); return; }
+    lookupBtn.disabled = true;
+    lookupBox.hidden = false;
+    lookupBox.replaceChildren(h('span', { class: 'muted' }, t('Ищу {0} в UPCitemdb…', value)));
+    lookupBox.scrollIntoView({ block: 'nearest' });
+    try {
+      const data = await api('GET', `/lookup/upcitemdb?barcode=${encodeURIComponent(value)}`);
+      const left = data.remaining == null ? null
+        : h('div', { class: 'muted small' }, t('Осталось запросов на сегодня: {0}', data.remaining));
+      if (!data.found) {
+        // replaceChildren() would print a missing part as the word "null"
+        lookupBox.replaceChildren(...[h('b', null, t('UPCitemdb не знает штрихкод {0}', data.barcode)),
+          h('div', { class: 'muted small' }, t('Заполните поля вручную или по фото этикетки.')), left].filter(Boolean));
+        return;
+      }
+      const s = data.suggestion;
+      const filled = [];
+      lookupTags.forEach(tg => setTag(tg, false));
+      lookupTags = [];
+      let otherName = null;
+      if (s.name && !name.value.trim()) { name.value = s.name; filled.push(t('название')); }
+      else if (s.name && s.name !== name.value.trim()) otherName = s.name;
+      if (s.manufacturer && (isNew || !maker.value)) {
+        if (!maker.querySelector(`option[value="${s.manufacturer.id}"]`)) {
+          maker.insertBefore(h('option', { value: String(s.manufacturer.id) }, s.manufacturer.name), maker.querySelector(`option[value="${NEW}"]`));
+        }
+        selectMaker(s.manufacturer.id);
+        filled.push(t('производитель'));
+      } else if (s.new_manufacturer && isNew) {
+        proposeMaker(s.new_manufacturer);
+      }
+      if (s.code && !code.value.trim()) { code.value = s.code; filled.push(t('код')); }
+      lookupTags = s.tag_ids.filter(tg => tagChips.has(tg) && !selectedTags.has(tg));
+      lookupTags.forEach(tg => setTag(tg, true));
+      if (lookupTags.length) filled.push(lookupTags.length === 1 ? t('тег') : t('теги'));
+      const item = data.item;
+      lookupBox.replaceChildren(...[
+        h('b', null, filled.length ? t('Заполнено: ') + filled.join(', ') : t('Нашлось, но новых полей не заполнено')),
+        h('div', { class: 'small' }, 'UPCitemdb: ', item.title || '—', item.brand ? ` · ${item.brand}` : ''),
+        s.new_manufacturer && isNew
+          ? h('div', { class: 'muted small' }, t('Производителя «{0}» ещё нет в списке — добавьте его или выберите другого.', s.new_manufacturer)) : null,
+        otherName ? h('button', { type: 'button', class: 'btn small-btn', style: 'margin-top:6px',
+          onclick: e => { name.value = otherName; e.target.remove(); } }, t('Подставить название «{0}»', otherName)) : null,
+        h('div', { class: 'muted small' }, t('Проверьте поля: название из магазина бывает неточным.')), left].filter(Boolean));
+    } catch (err) {
+      lookupBox.replaceChildren(h('b', null, t('Не получилось найти')), h('div', { class: 'muted small' }, lookupProblem(err)));
+    } finally {
+      lookupBtn.disabled = false;
+    }
+  }
+  lookupBtn.addEventListener('click', () => lookupOnline());
+
   // ---- add by photo (new paints only; optional part of the app)
   const photoBlock = isNew ? photoRecognizer({
     status: photo,
@@ -1092,16 +1169,13 @@ async function viewPaintForm(mount, id, prefillStorage = null) {
         }
         selectMaker(id);
       },
-      proposeMaker(text) {
-        maker.value = NEW;
-        newMakerBox.hidden = false;
-        newMakerInput.value = text;
-        newMakerInput.focus();
-      },
+      proposeMaker,
+      lookup: lookupOn ? lookupOnline : null,
       setTag,
       placement: () => placementBody(placement.value),
       clearForNext() {
         name.value = ''; code.value = ''; barcode.value = ''; hexText.value = ''; setSwatch(preview, null); qty.value = '1';
+        lookupTags = []; lookupBox.hidden = true;
       },
     },
   }) : null;
@@ -1170,6 +1244,7 @@ async function viewPaintForm(mount, id, prefillStorage = null) {
           // keep manufacturer, storage and tags — usually the next pot is from the same batch
           name.value = ''; code.value = ''; barcode.value = ''; hexText.value = ''; setSwatch(preview, null); qty.value = '1';
           if (photoBlock) photoBlock.reset();
+          lookupTags = []; lookupBox.hidden = true;
           // the next pot goes straight to the camera; otherwise (computer) to the name field
           if (!(photoBlock && photoBlock.startCamera())) name.focus();
           return;
@@ -1196,7 +1271,9 @@ async function viewPaintForm(mount, id, prefillStorage = null) {
     h('div', { class: 'field' }, h('label', { for: 'f-maker' }, t('Производитель')), maker, newMakerBox),
     h('div', { class: 'two' },
       h('div', { class: 'field' }, h('label', { for: 'f-code' }, t('Код / артикул')), code),
-      h('div', { class: 'field' }, h('label', { for: 'f-barcode' }, t('Штрихкод')), barcode)),
+      h('div', { class: 'field' }, h('label', { for: 'f-barcode' }, t('Штрихкод')),
+        lookupOn ? h('div', { class: 'lookup-row' }, barcode, lookupBtn) : barcode)),
+    lookupBox,
     h('div', { class: 'field' }, h('label', { for: 'f-hex' }, t('Цвет')),
       h('div', { class: 'color-row' }, preview, hexText, picker, clearColor)),
     isNew
@@ -1474,11 +1551,19 @@ function photoRecognizer({ status, fill }) {
     } else {
       if (!fill.barcode.trim()) fill.barcode = code;
       setLabelAim(true);
-      streamStatus.replaceChildren(
+      streamStatus.replaceChildren(...[
         h('b', null, t('Новый штрихкод {0}', code)),
-        h('div', { class: 'muted small' }, t('Его ещё нет в каталоге. Поставьте этикетку в рамку и нажмите «Снимок этикетки» — заполню остальное.')));
+        h('div', { class: 'muted small' }, t('Его ещё нет в каталоге. Поставьте этикетку в рамку и нажмите «Снимок этикетки» — заполню остальное.')),
+        lookupButton(code, () => stopStream())].filter(Boolean));
       shutter.classList.add('pulse');
     }
+  }
+
+  /** "Find in UPCitemdb" for a barcode that isn't in the catalog yet; nothing when the setting is off. */
+  function lookupButton(code, before = null) {
+    if (!fill.lookup || !/^(\d{8}|\d{12,14})$/.test(code)) return null;
+    return h('button', { type: 'button', class: 'btn small-btn', style: 'margin-top:8px',
+      onclick: () => { if (before) before(); fill.lookup(code); } }, t('🔎 Найти в UPCitemdb'));
   }
 
   function showFlagHelp() {
@@ -1621,7 +1706,8 @@ function photoRecognizer({ status, fill }) {
     if (data.barcodes.length) {
       const b = data.barcodes[0];
       parts.push(h('div', { class: 'muted small photo-section' }, t('Штрихкод {0}: ', b.text),
-        b.paint_id ? t('уже привязан к краске из каталога') : t('новый — сохранится вместе с краской')));
+        b.paint_id ? t('уже привязан к краске из каталога') : t('новый — сохранится вместе с краской'),
+        b.paint_id ? null : h('div', null, lookupButton(b.text))));
     }
     panel.replaceChildren(...parts);
   }
@@ -2318,6 +2404,23 @@ async function viewSettings(mount) {
       }),
       h('div', { class: 'hint' }, t('Выбранная сортировка списка сохранится после перезагрузки страницы.'))));
 
+  const look = info.lookup || {};
+  const lookupPanel = h('div', { class: 'panel form' },
+    h('div', { class: 'field' }, h('span', { class: 'label' }, 'UPCitemdb'),
+      segButtons('UPCitemdb', [['off', t('Нет')], ['on', t('Да')]], look.upcitemdb ? 'on' : 'off', async value => {
+        try {
+          const r = await api('PUT', '/settings/lookup', { enabled: value === 'on' });
+          if (r.overridden_by_env) toast(t('Сохранено, но сейчас действует переменная окружения PAINT_LOOKUP'), 'warn');
+          render();
+        } catch (err) { toast(t('Не получилось сохранить: {0}', err.message), 'err'); }
+      }),
+      h('div', { class: 'hint' }, t('Кнопка 🔎 у штрихкода спрашивает UPCitemdb, что это за товар, и заполняет форму краски. Отправляется только штрихкод и только по нажатию. Бесплатно: 100 запросов в день.')),
+      h('div', { class: 'hint' },
+        look.via === 'proxy' ? t('Запросы идут через прокси.')
+          : look.via === 'interface' ? t('Запросы идут через интерфейс {0}.', look.interface)
+            : t('Запросы идут напрямую, без прокси.'),
+        ' ', t('Прокси или сетевой интерфейс задаются в config.ini, раздел [lookup].'))));
+
   let signIn;
   if (!state.enabled) {
     signIn = h('div', { class: 'panel' },
@@ -2364,6 +2467,7 @@ async function viewSettings(mount) {
     pageHead(t('Настройки')),
     h('h2', null, t('Язык')), language,
     h('h2', null, t('Резервная копия')), backupPanel(),
+    h('h2', null, t('Поиск штрихкода в интернете')), lookupPanel,
     h('h2', null, t('На этом устройстве')), device,
     h('h2', null, t('Вход по паролю')), signIn,
     h('p', { class: 'muted small' },

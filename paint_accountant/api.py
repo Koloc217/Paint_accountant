@@ -5,20 +5,22 @@ from __future__ import annotations
 import io
 import os
 import sqlite3
+from dataclasses import replace
 from typing import Iterator, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from starlette.concurrency import run_in_threadpool
 
 from . import repository as repo
-from . import __version__, backup, export, recognition
+from . import __version__, backup, export, lookup, recognition
 from .db import connect
 from .netinfo import lan_url
-from .config import save_language
+from .config import save_language, save_lookup
 from .schemas import (
     BulkIn,
     BulkResult,
     LanguageIn,
+    LookupSettingIn,
     Manufacturer,
     ManufacturerIn,
     MergeIn,
@@ -87,8 +89,11 @@ def health(conn: sqlite3.Connection = Conn) -> dict:
 @router.get("/info", tags=["system"])
 def info(request: Request) -> dict:
     """Version, the address other devices on the network can use (for NFC/QR links), interface language."""
-    return {"version": __version__, "lan_url": lan_url(request.app.state.settings.port),
-            "language": request.app.state.language}
+    settings = request.app.state.settings
+    return {"version": __version__, "lan_url": lan_url(settings.port),
+            "language": request.app.state.language,
+            "lookup": {"upcitemdb": settings.lookup_enabled, "via": lookup.route(settings).kind,
+                       "interface": None if settings.lookup_proxy else settings.lookup_interface}}
 
 
 @router.put("/settings/language", tags=["system"])
@@ -102,6 +107,52 @@ def set_language(body: LanguageIn, request: Request) -> dict:
     request.app.state.language = body.language
     return {"language": body.language, "config_file": str(settings.config_file),
             "overridden_by_env": bool(os.environ.get("PAINT_LANGUAGE"))}
+
+
+@router.put("/settings/lookup", tags=["system"])
+def set_lookup(body: LookupSettingIn, request: Request) -> dict:
+    """Online barcode lookup on or off, for every device; saved into config.ini ([lookup] upcitemdb)."""
+    settings = request.app.state.settings
+    try:
+        save_lookup(settings.config_file, body.enabled)
+    except OSError as exc:
+        raise HTTPException(500, f"can't write {settings.config_file}: {exc}")
+    request.app.state.settings = replace(settings, lookup_enabled=body.enabled)
+    return {"upcitemdb": body.enabled, "config_file": str(settings.config_file),
+            "overridden_by_env": bool(os.environ.get("PAINT_LOOKUP"))}
+
+
+_LOOKUP_STATUS = {
+    "lookup_disabled": 409, "lookup_bad_barcode": 422, "lookup_limit": 429, "lookup_too_fast": 429,
+    "lookup_config": 500, "lookup_unreachable": 502, "lookup_error": 502,
+}
+
+
+@router.get("/lookup/upcitemdb", tags=["photo"])
+async def lookup_upcitemdb(
+    request: Request,
+    barcode: str = Query(..., min_length=8, max_length=20, description="EAN-8, UPC-A, EAN-13 or GTIN-14, digits"),
+) -> dict:
+    """Ask UPCitemdb what this barcode is and turn the answer into suggestions for the paint form.
+
+    The request leaves from the computer running the app (through the proxy or interface from
+    config.ini, if set) and carries only the barcode. `found` is false when UPCitemdb doesn't
+    know it. Errors come as {"code": "lookup_…", "message": …}: 409 turned off, 429 the free
+    limit (100 a day, 6 a minute), 502 no connection."""
+    settings = request.app.state.settings
+
+    def work() -> dict:
+        conn = connect(settings.db_path)
+        try:
+            return lookup.lookup(conn, settings, barcode)
+        finally:
+            conn.close()
+
+    try:
+        return await run_in_threadpool(work)
+    except lookup.LookupFailed as exc:
+        raise HTTPException(_LOOKUP_STATUS.get(exc.code, 502),
+                            {"code": exc.code, "message": str(exc), "reset": exc.reset})
 
 
 @router.get("/qr.svg", tags=["system"], response_class=Response,

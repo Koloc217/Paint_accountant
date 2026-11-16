@@ -999,3 +999,8 @@ body.wide-table main, body.wide-table .topbar-inner { max-width: 1120px; }
 .paint-tr.picked { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .paint-tr.picked .pick-box { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .paint-tr.picked .pick-box::after { content: "✓"; }
+
+/* online barcode lookup (UPCitemdb) */
+.lookup-row { display: flex; gap: 6px; align-items: center; }
+.lookup-row .input { flex: 1; min-width: 0; }
+.lookup-box { margin: -4px 0 14px; overflow-wrap: anywhere; }

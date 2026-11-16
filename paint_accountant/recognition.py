@@ -398,6 +398,7 @@ def _match_manufacturer(lines: list[Line], makers: list[dict]) -> tuple[dict | N
 BARCODE_PREFIXES = {
     "8429551": "Vallejo",
     "8435646": "Green Stuff World",
+    "8436574": "Green Stuff World",
     "5011921": "Citadel",
     "5713799": "Army Painter",
     "8435568": "AK",

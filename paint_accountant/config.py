@@ -32,6 +32,7 @@ DEFAULT_PORT = 8642
 DEFAULT_DATA_DIR = "data"
 LANGUAGES = ("auto", "ru", "en")  # auto = the browser's language
 DEFAULT_LANGUAGE = "auto"
+DEFAULT_LOOKUP = True  # online barcode lookup (UPCitemdb); nothing is sent until the button is pressed
 
 
 @dataclass(frozen=True)
@@ -40,6 +41,9 @@ class Settings:
     port: int
     data_dir: Path
     language: str = DEFAULT_LANGUAGE
+    lookup_enabled: bool = DEFAULT_LOOKUP
+    lookup_proxy: str | None = None  # socks5://host:port, socks5h://…, http://…
+    lookup_interface: str | None = None  # network interface ("awg0") or local address to send from
     config_file: Path = CONFIG_FILE  # where the language chosen in the app is saved
 
     @property
@@ -56,18 +60,27 @@ class Settings:
 
 
 def _read_config_file(path: Path) -> dict[str, str]:
-    """Keys of the [server] and [ui] sections (their names don't overlap)."""
+    """Keys of the [server], [ui] and [lookup] sections (their names don't overlap)."""
     if not path.is_file():
         return {}
     parser = configparser.ConfigParser()
     parser.read(path, encoding="utf-8")
-    return {k: v.strip() for section in ("server", "ui") if parser.has_section(section)
+    return {k: v.strip() for section in ("server", "ui", "lookup") if parser.has_section(section)
             for k, v in parser[section].items() if v.strip()}
 
 
 def _language(value: str | None) -> str:
     value = (value or "").strip().lower()
     return value if value in LANGUAGES else DEFAULT_LANGUAGE
+
+
+def _flag(value: str | None, default: bool) -> bool:
+    value = (value or "").strip().lower()
+    if value in ("on", "yes", "true", "1"):
+        return True
+    if value in ("off", "no", "false", "0"):
+        return False
+    return default
 
 
 def _resolve(path: str | os.PathLike[str]) -> Path:
@@ -89,35 +102,46 @@ def load_settings(
         port=int(port or env.get("PAINT_PORT") or file.get("port") or DEFAULT_PORT),
         data_dir=_resolve(data_dir or env.get("PAINT_DATA_DIR") or file.get("data_dir") or DEFAULT_DATA_DIR),
         language=_language(env.get("PAINT_LANGUAGE") or file.get("language")),
+        lookup_enabled=_flag(env.get("PAINT_LOOKUP") or file.get("upcitemdb"), DEFAULT_LOOKUP),
+        lookup_proxy=(env.get("PAINT_LOOKUP_PROXY") or file.get("proxy") or "").strip() or None,
+        lookup_interface=(env.get("PAINT_LOOKUP_INTERFACE") or file.get("interface") or "").strip() or None,
         config_file=path,
     )
 
 
-def save_language(path: Path, language: str) -> None:
-    """Write `language = …` into the [ui] section, keeping the rest of the file (and its comments) as is."""
-    language = _language(language)
+def save_option(path: Path, section: str, key: str, value: str, comment: str) -> None:
+    """Write `key = value` into [section], keeping the rest of the file (and its comments) as is."""
     text = path.read_text(encoding="utf-8") if path.is_file() else ""
     lines = text.splitlines()
-    section = None
-    ui_at = None
+    current = None
+    section_at = None
     for i, line in enumerate(lines):
         s = line.strip()
         if s.startswith("[") and s.endswith("]"):
-            section = s[1:-1].strip().lower()
-            if section == "ui":
-                ui_at = i
-        elif section == "ui" and s.split("=", 1)[0].strip().lower() == "language" and "=" in s:
-            lines[i] = f"language = {language}"
+            current = s[1:-1].strip().lower()
+            if current == section:
+                section_at = i
+        elif current == section and s.split("=", 1)[0].strip().lower() == key and "=" in s:
+            lines[i] = f"{key} = {value}"
             break
     else:
-        if ui_at is None:
+        if section_at is None:
             if lines and lines[-1].strip():
                 lines.append("")
-            lines += ["[ui]", "; Interface language: auto (the browser's), ru or en. Also set in the app's Settings.",
-                      f"language = {language}"]
+            lines += [f"[{section}]", f"; {comment}", f"{key} = {value}"]
         else:
-            lines.insert(ui_at + 1, f"language = {language}")
+            lines.insert(section_at + 1, f"{key} = {value}")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def save_language(path: Path, language: str) -> None:
+    save_option(path, "ui", "language", _language(language),
+                "Interface language: auto (the browser's), ru or en. Also set in the app's Settings.")
+
+
+def save_lookup(path: Path, enabled: bool) -> None:
+    save_option(path, "lookup", "upcitemdb", "on" if enabled else "off",
+                "Online barcode lookup at UPCitemdb: on or off. Also set in the app's Settings.")
 
 
 def ensure_config_file(path: Path = CONFIG_FILE, example: Path = CONFIG_EXAMPLE) -> bool:

@@ -72,6 +72,15 @@ On first start `config.ini` is created from `config.example.ini`; edit it to cha
 | `port` | `--port` | `PAINT_PORT` | `8642` |
 | `language` (section `[ui]`) | — | `PAINT_LANGUAGE` | `auto` — the browser's language; `ru` or `en` for every device. ⚙ Settings writes it here |
 | `data_dir` | `--data-dir` | `PAINT_DATA_DIR` | `data` inside the app folder; relative paths are counted from the app folder, absolute ones (`/mnt/usb/paints`, `D:\Paints`) work too |
+| `upcitemdb` (section `[lookup]`) | — | `PAINT_LOOKUP` | `on` — the 🔎 button next to a barcode; `off` hides it. ⚙ Settings writes it here |
+| `proxy` (section `[lookup]`) | — | `PAINT_LOOKUP_PROXY` | empty — the system's `HTTPS_PROXY` / `ALL_PROXY` if set, otherwise direct; `socks5://host:port`, `socks5h://…` (the proxy resolves the name too) or `http://host:port`, with `user:password@` if needed |
+| `interface` (section `[lookup]`) | — | `PAINT_LOOKUP_INTERFACE` | empty; a network interface to send lookups through, e.g. a VPN's `awg0` (Linux), or that interface's IP address (any OS). Ignored when `proxy` is set |
+
+### Looking a barcode up online (optional)
+
+The **🔎** button next to the barcode field (and **🔎 Find at UPCitemdb** after a new barcode is scanned) asks [UPCitemdb](https://www.upcitemdb.com/) what the product is and fills in the empty fields: the name (cleaned from the shop title — brand, volume and words like "Acrylic Paint … Modelling Hobby" are dropped), manufacturer, code and tags. A brand that isn't in your list is offered as a new manufacturer. Always check the result: shop titles can be inexact, and many hobby paints aren't in the database at all.
+
+Only the barcode is sent, only when you press the button, and from the computer running the app — not from the phone. The free API needs no key: 100 lookups a day and 6 a minute per IP address; a repeated lookup of the same barcode within a day is answered from memory. Turn it off in ⚙ Settings or with `upcitemdb = off`. If the site isn't reachable from your network, set a proxy or a VPN interface in `[lookup]` (see the table above); nothing has to be installed for that.
 
 ### Adding paints by photo (optional)
 
@@ -139,6 +148,8 @@ No build step and no external libraries — plain HTML, CSS and JavaScript in `p
 | GET | `/api/recognize` | whether photo recognition is installed |
 | POST | `/api/recognize` | send a photo as the body (`Content-Type: image/jpeg`); returns label text, barcodes, form suggestions and matching paints; `?barcode_only=true` skips text (for live camera frames) |
 | PUT | `/api/settings/language` | `{"language": "auto" \| "ru" \| "en"}` — saved into `config.ini` |
+| PUT | `/api/settings/lookup` | `{"enabled": true \| false}` — online barcode lookup on or off, saved into `config.ini` |
+| GET | `/api/lookup/upcitemdb?barcode=…` | ask UPCitemdb about a barcode: `found`, the raw `item` (title, brand…) and a `suggestion` for the form (name, manufacturer or `new_manufacturer`, code, tag ids), `remaining` requests today; errors carry `detail.code`: `lookup_disabled` (409), `lookup_limit` / `lookup_too_fast` (429), `lookup_unreachable` (502) |
 | GET | `/api/qr.svg?data=…` | QR code as SVG (for storage labels) |
 | GET | `/api/auth` | whether sign-in is on and this device is signed in |
 | POST | `/api/auth/login` · `/api/auth/logout` | `{"password": "…"}`; sets / clears the session cookie |

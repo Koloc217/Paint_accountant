@@ -299,3 +299,7 @@ class NewPasswordIn(BaseModel):
 
 class LanguageIn(BaseModel):
     language: Literal["auto", "ru", "en"] = Field(..., description="auto = the browser's language")
+
+
+class LookupSettingIn(BaseModel):
+    enabled: bool = Field(..., description="online barcode lookup (UPCitemdb) on or off")
