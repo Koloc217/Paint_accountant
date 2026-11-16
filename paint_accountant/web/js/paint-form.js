@@ -183,6 +183,7 @@ export async function viewPaintForm(mount, id, prefillStorage = null) {
       lookupBox.replaceChildren(...[
         h('b', null, filled.length ? t('Заполнено: ') + filled.join(', ') : t('Нашлось, но новых полей не заполнено')),
         h('div', { class: 'small' }, 'UPCitemdb: ', item.title || '—', item.brand ? ` · ${item.brand}` : ''),
+        s.range_only ? h('div', { class: 'muted small' }, t('Это объявление на всю линейку — название и теги по нему не определить, впишите сами.')) : null,
         s.new_manufacturer && isNew
           ? h('div', { class: 'muted small' }, t('Производителя «{0}» ещё нет в списке — добавьте его или выберите другого.', s.new_manufacturer)) : null,
         otherName ? h('button', { type: 'button', class: 'btn small-btn', style: 'margin-top:6px',

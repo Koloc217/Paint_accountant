@@ -149,12 +149,54 @@ def test_wholesale_article_never_becomes_the_name(client, monkeypatch):
     assert s["manufacturer"]["name"] == "Citadel"
 
 
+# a real answer where UPCitemdb's own title is a listing for the whole range and the
+# colour's name is only in the shops' titles under "offers"
+BALTHASAR = {
+    "ean": "5011921118816",
+    "title": "Citadel Paint Pot - Base, Layer, Contrast & Shade - Games Workshop - Warhammer",
+    "brand": "Games Workshop",
+    "offers": [{"title": "GAW9918995013006 Balthasar Gold Base Paint", "price": 4.2},
+               {"title": "Base - Balthasar Gold Citadel Paints", "price": 4.5}],
+}
+
+
+def test_the_name_is_taken_from_a_shops_title(client, monkeypatch):
+    _answer(monkeypatch, data={"items": [BALTHASAR]})
+    d = client.get("/api/lookup/upcitemdb", params={"barcode": "5011921118816"}).json()
+    s = d["suggestion"]
+    assert s["name"] == "Balthasar Gold" and s["manufacturer"]["name"] == "Citadel"
+    tags = {t["id"]: t["name"] for t in client.get("/api/tags").json()}
+    assert [tags[i] for i in s["tag_ids"]] == ["Основа"]  # not every kind the range listing names
+    assert s["range_only"] is False
+    assert d["item"]["title"] == "GAW9918995013006 Balthasar Gold Base Paint"  # the listing used
+
+
+def test_a_range_listing_alone_fills_nothing(client, monkeypatch):
+    """Base, Layer, Contrast & Shade in one title: no colour of its own, so no name and no tags."""
+    _answer(monkeypatch, data={"items": [{k: v for k, v in BALTHASAR.items() if k != "offers"}]})
+    s = client.get("/api/lookup/upcitemdb", params={"barcode": "5011921118816"}).json()["suggestion"]
+    assert s["name"] is None and s["tag_ids"] == [] and s["range_only"] is True
+    assert s["manufacturer"]["name"] == "Citadel"  # the brand is still worth having
+
+
+def test_only_what_we_read_is_cached(client, monkeypatch):
+    heavy = dict(BALTHASAR, description="x" * 5000,
+                 offers=[dict(o, link="http://shop/" + "y" * 500) for o in BALTHASAR["offers"]])
+    _answer(monkeypatch, data={"items": [heavy]})
+    client.get("/api/lookup/upcitemdb", params={"barcode": "5011921118816"})
+    cached = lookup._cache["5011921118816"][1]["items"][0]
+    assert "description" not in cached and cached["offers"] == [
+        {"title": "GAW9918995013006 Balthasar Gold Base Paint"},
+        {"title": "Base - Balthasar Gold Citadel Paints"}]
+
+
 def test_several_listings_the_one_with_a_name_wins(client, monkeypatch):
     nothing = {"title": "Citadel Base Paint Pot - Games Workshop - All Colors!", "brand": "Citadel Miniatures"}
     _answer(monkeypatch, data={"items": [nothing, MEPHISTON]})
     d = client.get("/api/lookup/upcitemdb", params={"barcode": "5011921026203"}).json()
     assert d["suggestion"]["name"] == "Mephiston Red"
     assert d["item"]["title"] == MEPHISTON["title"]  # the listing that was used is the one shown
+    assert d["suggestion"]["range_only"] is False
 
 
 def test_code_and_manufacturer_from_the_title(client, monkeypatch):

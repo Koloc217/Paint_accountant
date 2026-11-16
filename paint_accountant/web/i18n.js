@@ -401,6 +401,7 @@ const EN = {
   "Нашлось, но новых полей не заполнено": "Found, but no new fields were filled",
   "Производителя «{0}» ещё нет в списке — добавьте его или выберите другого.": "Manufacturer “{0}” isn't in the list yet — add it or pick another one.",
   "Подставить название «{0}»": "Use the name “{0}”",
+  "Это объявление на всю линейку — название и теги по нему не определить, впишите сами.": "This listing covers the whole range — it gives no name or tags, so fill them in yourself.",
   "Проверьте поля: название из магазина бывает неточным.": "Check the fields: a shop's title can be inexact.",
   "Не получилось найти": "Couldn't look it up",
   "🔎 Найти в UPCitemdb": "🔎 Find at UPCitemdb",

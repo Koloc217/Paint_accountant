@@ -38,6 +38,7 @@ API_PATH = "/prod/trial/lookup"
 TIMEOUT = 15  # seconds, for each network step
 CACHE_SECONDS = 24 * 3600
 CACHE_SIZE = 500
+MAX_TITLES = 8  # titles of one item to weigh: its own plus the shops' own
 MAX_ANSWER = 2 * 1024 * 1024
 
 BARCODE = re.compile(r"\d{8}|\d{12,14}")  # EAN-8, UPC-A, EAN-13, GTIN-14
@@ -278,6 +279,14 @@ def _text(value: Any, limit: int = 300) -> str:
     return " ".join(str(value).split())[:limit] if isinstance(value, (str, int, float)) else ""
 
 
+def _essentials(item: dict) -> dict[str, Any]:
+    """Only what we read, so a cached answer stays small whatever the shops attach to it."""
+    kept: dict[str, Any] = {key: _text(item.get(key)) for key in ("title", "brand", "model", "color", "size", "category")}
+    offers = item.get("offers") if isinstance(item.get("offers"), list) else []
+    kept["offers"] = [{"title": _text(o.get("title"))} for o in offers[:MAX_TITLES] if isinstance(o, dict)]
+    return kept
+
+
 def _find_maker(item: dict, barcode: str, makers: list[dict], conn: sqlite3.Connection) -> dict | None:
     by_name = {rec.norm(m["name"]): m for m in makers}
     brand = rec.norm(_text(item.get("brand")))
@@ -352,43 +361,85 @@ def tag_words(conn: sqlite3.Connection) -> set[str]:
     return {rec.norm(r["keyword"]) for r in conn.execute("SELECT keyword FROM tag_keyword")}
 
 
+def titles(item: dict) -> list[str]:
+    """Every title this listing goes by: the main one, then each shop's own.
+
+    UPCitemdb picks one title for an item, and it is often a listing for the whole
+    range ("Citadel Paint Pot - Base, Layer, Contrast & Shade"); the shops' titles
+    under `offers` are where the colour's own name usually is.
+    """
+    found, seen = [], set()
+    offers = item.get("offers") if isinstance(item.get("offers"), list) else []
+    for value in [item.get("title"), *(o.get("title") for o in offers if isinstance(o, dict))]:
+        text = _text(value)
+        key = rec.norm(RETAILER_SKU.sub(" ", text))
+        if key and key not in seen:
+            seen.add(key)
+            found.append(text)
+        if len(found) >= MAX_TITLES:
+            break
+    return found
+
+
 def suggest(conn: sqlite3.Connection, barcode: str, item: dict) -> dict[str, Any]:
-    """Fields for the paint form out of one UPCitemdb item."""
+    """Fields for the paint form out of one UPCitemdb item.
+
+    Of the item's titles, the one that actually names a colour is used — for the name,
+    the code and the tags alike, so they can't come from different listings.
+    """
     makers = repo.list_manufacturers(conn)
     keywords = [(r["keyword"], r["tag_id"]) for r in conn.execute("SELECT keyword, tag_id FROM tag_keyword")]
     kinds = tag_words(conn)
 
-    title = RETAILER_SKU.sub(" ", _text(item.get("title")))
     brand = _text(item.get("brand"), 100)
     model = RETAILER_SKU.sub(" ", _text(item.get("model"), 50))
     maker = _find_maker(item, barcode, makers, conn)
 
-    # the code: a shop title can hold any numbers, so only a pattern of this very manufacturer counts
-    code, code_maker = rec.find_code_with_maker(f"{model} {title}", maker["name"] if maker else None)
-    if maker:
-        if code_maker != maker["name"]:
-            code = None
-    elif code_maker in rec.TELLING_CODES:
-        maker = next((m for m in makers if rec.norm(m["name"]) == rec.norm(code_maker)), None)
-        if maker is None:
-            code = None
-    else:
-        code = None
+    def find_code(title: str) -> str | None:
+        """A shop's title can hold any numbers, so only a pattern of this very manufacturer counts."""
+        nonlocal maker
+        code, code_maker = rec.find_code_with_maker(f"{model} {title}", maker["name"] if maker else None)
+        if maker:
+            return code if code_maker == maker["name"] else None
+        if code_maker in rec.TELLING_CODES:
+            found = next((m for m in makers if rec.norm(m["name"]) == rec.norm(code_maker)), None)
+            if found:
+                maker = found  # a code only this manufacturer uses tells us whose paint it is
+                return code
+        return None
 
     names = [brand]
     if maker:
         names.append(maker["name"])
         names += [alias for alias, canonical in rec.ALIASES.items() if rec.norm(canonical) == rec.norm(maker["name"])]
-    name = clean_title(title, names, code, kinds)
+
+    def read(shown: str) -> dict[str, Any]:
+        title = RETAILER_SKU.sub(" ", shown)  # the shop's own article is not the maker's
+        code = find_code(title)
+        name = clean_title(title, names, code, kinds)
+        real = {rec.norm(w) for w in name.split()} - kinds
+        # "Base, Layer, Contrast & Shade" is the whole range in one listing: it names no
+        # colour, and its kinds are not this pot's tags
+        a_range = not real and len({k for k in kinds if f" {k} " in f" {rec.norm(title)} "}) > 1
+        return {"title": shown, "name": "" if a_range else name, "code": code,
+                "tag_ids": [] if a_range else rec._tag_ids(title, keywords),
+                "range": a_range, "real": bool(real)}
+
+    # the best listing: one that names a colour, then one that at least carries the code
+    reads = [read(title) for title in titles(item)] or [read("")]
+    best = max(reads, key=lambda r: (r["real"], bool(r["name"]), r["code"] is not None))
 
     return {
-        "name": name or None,
+        "name": best["name"] or None,
         "manufacturer": {"id": maker["id"], "name": maker["name"]} if maker else None,
         # a brand that isn't in the manufacturers list yet: the form offers to add it
         "new_manufacturer": rec.clean_name(brand) if brand and not maker else None,
-        "code": code,
+        "code": best["code"],
         "barcode": barcode,
-        "tag_ids": rec._tag_ids(title, keywords),
+        "tag_ids": best["tag_ids"],
+        "title": best["title"],  # the listing these fields came from
+        # nothing but listings for the whole range: there is no colour name to take
+        "range_only": all(r["range"] or not r["name"] for r in reads),
     }
 
 
@@ -452,8 +503,10 @@ def lookup(conn: sqlite3.Connection, settings, barcode: str) -> dict[str, Any]:
             message = _text(data.get("message"), 200) if isinstance(data, dict) else ""
             raise LookupFailed("lookup_error", f"UPCitemdb answered {status}" + (f": {message}" if message else ""))
         # one barcode can come back with several listings of the same paint, whose titles differ
-        # ("Warhammer Paint: Mephiston Red" vs "… Citadel Base … 21-03"): keep a few to choose from
-        raw = {"items": items[:5], "remaining": _int(headers.get("x-ratelimit-remaining"))}
+        # ("Warhammer Paint: Mephiston Red" vs "… Citadel Base … 21-03"): keep a few to choose
+        # from, each cut down to the fields we read so the cache stays small
+        raw = {"items": [_essentials(i) for i in items[:5]],
+               "remaining": _int(headers.get("x-ratelimit-remaining"))}
         if len(_cache) >= CACHE_SIZE:
             _cache.pop(next(iter(_cache)))
         _cache[barcode] = (now, raw)
@@ -475,7 +528,9 @@ def lookup(conn: sqlite3.Connection, settings, barcode: str) -> dict[str, Any]:
 
         tries = [(item, suggest(conn, barcode, item)) for item in raw["items"]]
         item, suggestion = max(tries, key=lambda pair: worth(pair[1]))
-        result["item"] = {key: _text(item.get(key)) or None
-                          for key in ("title", "brand", "model", "color", "size", "category")}
+        result["item"] = {key: item.get(key) or None
+                          for key in ("brand", "model", "color", "size", "category")}
+        # the listing the fields were taken from, which can be a shop's rather than the main one
+        result["item"]["title"] = suggestion.pop("title") or item.get("title") or None
         result["suggestion"] = suggestion
     return result
