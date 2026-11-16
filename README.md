@@ -113,7 +113,7 @@ pytest
 - **Catalogs** — two tabs, manufacturers and tags. Tap a row to see its paints; ✎ renames (Enter saves, Esc cancels); 🗑 deletes (a manufacturer only when it has no paints). Tags show their color (tap to change), paint count and label words. Counters count different paints: the same paint entered twice (same manufacturer and name, e.g. once with a code and once without) counts once; the same name with different codes counts as different paints. Starter manufacturers: AK, Citadel, Green Stuff World, Kaleido, Kimera, Scale75, Tamiya, Vallejo
 - **Statistics** (📊) — totals; which storages are the busiest (bars, share of all pots, empty ones); paints with several pots and those lying in several storages; **possible duplicate records** (same manufacturer and name, different code or barcode — open one and press **Merge**); breakdown by manufacturer and tag; how many paints have no tag, color or barcode. The same numbers are at `GET /api/stats`
 
-No build step and no external libraries — plain HTML, CSS and JavaScript in `paint_accountant/web/`, so it works on a home network without internet.
+No build step and no external libraries — plain HTML, CSS and JavaScript in `paint_accountant/web/`, so it works on a home network without internet. The scripts are ES modules: `app.js` starts the app, `i18n.js` holds the texts, and each screen has its own file in `web/js/` (the list of them is at the top of `app.js`).
 
 ## API
 

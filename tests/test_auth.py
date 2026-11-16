@@ -48,6 +48,7 @@ def test_turning_on_guards_api_but_not_the_page(app, client):
         # the app itself, static files, health and storage links still load, so the login screen can show
         assert other.get("/").status_code == 200
         assert other.get("/static/app.js").status_code == 200
+        assert other.get("/static/js/core.js").status_code == 200
         assert other.get("/api/health").status_code == 200
         r = other.get("/storage/1", follow_redirects=False)
         assert r.status_code in (302, 307)

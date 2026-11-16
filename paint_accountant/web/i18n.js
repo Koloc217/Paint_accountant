@@ -1,18 +1,17 @@
 /* Interface language. Russian text is the key; EN holds the English version.
  * The language is set in config.ini ([ui] language, also from Settings) for every device;
  * the server puts it into <html data-lang>. "auto" means the browser's language. */
-'use strict';
 
-const LANGS = [['ru', 'Русский'], ['en', 'English']];
+export const LANGS = [['ru', 'Русский'], ['en', 'English']];
 
-const LANG_SETTING = ['auto', ...LANGS.map(([code]) => code)].includes(document.documentElement.dataset.lang)
+export const LANG_SETTING = ['auto', ...LANGS.map(([code]) => code)].includes(document.documentElement.dataset.lang)
   ? document.documentElement.dataset.lang : 'auto';
 
-const LANG = LANG_SETTING !== 'auto' ? LANG_SETTING
+export const LANG = LANG_SETTING !== 'auto' ? LANG_SETTING
   : (navigator.language || 'ru').toLowerCase().startsWith('ru') ? 'ru' : 'en';
 
 /** Save the language into config.ini (for every device) and reload. */
-async function setLang(code) {
+export async function setLang(code) {
   const res = await fetch('/api/settings/language', {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ language: code }),
   });
@@ -21,14 +20,14 @@ async function setLang(code) {
 }
 
 /** t('Удалить «{0}»?', name) — the text in the current language with {0}, {1}… filled in. */
-function t(text, ...args) {
+export function t(text, ...args) {
   const s = (LANG === 'en' && EN[text]) || text;
   return args.length ? s.replace(/\{(\d+)\}/g, (m, i) => (args[i] === undefined ? m : String(args[i]))) : s;
 }
 
 /** Names in the page's language anywhere in an API answer: tags and storages carry
  *  "names" ({ru, en}), and "name" becomes the one for this page. */
-function localizeBuiltins(data) {
+export function localizeBuiltins(data) {
   if (data === null || typeof data !== 'object') return data;
   if (Array.isArray(data)) { data.forEach(localizeBuiltins); return data; }
   if (data.names && typeof data.names === 'object' && data.names[LANG]) data.name = data.names[LANG];
@@ -440,7 +439,7 @@ const SERVER_RU = [
 ];
 
 /** A server error message in the interface language. */
-function serverText(message) {
+export function serverText(message) {
   if (LANG !== 'ru' || typeof message !== 'string') return message;
   for (const [pattern, russian] of SERVER_RU) {
     if (pattern.test(message)) return message.replace(pattern, russian);
