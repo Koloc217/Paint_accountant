@@ -258,7 +258,15 @@ SHOP_WORDS = {
     "resin", "by", "from", "single", "unit", "units", "size",
     "warpaints", "3rd", "gen", "generation",  # product lines printed before the name
     "warhammer", "40k", "wargaming", "stock", "all", "official", "genuine", "new",
+    "brushes", "brushs",  # a title that sells brushes alongside the paints
 }
+
+# ranges that aren't tags of ours ("Citadel Dry", "Army Painter Spray"): not a colour's name
+# either, so they are trimmed off the edges of one just like the kinds we do tag
+EXTRA_KINDS = {"dry", "spray", "sprays"}
+
+# "...Pot Paint For Base": the pot is a Technical one, Base is just what it goes over
+CROSS_REFERENCE = re.compile(r"\b(?:for|over|under|with|onto|on)\s+(\w+)", re.I)
 
 # a shop's own article in front of the maker's: "GAW21-03" is Citadel's 21-03,
 # and "GAW9918995020406" is a wholesale number with nothing of ours in it
@@ -357,8 +365,8 @@ def clean_title(title: str, maker_names: list[str], code: str | None, tag_words:
 
 
 def tag_words(conn: sqlite3.Connection) -> set[str]:
-    """Words that only tell the kind of paint ("shade", "base") — tags of ours, not names."""
-    return {rec.norm(r["keyword"]) for r in conn.execute("SELECT keyword FROM tag_keyword")}
+    """Words that only tell the kind of paint ("shade", "base", "dry") — never a colour's name."""
+    return {rec.norm(r["keyword"]) for r in conn.execute("SELECT keyword FROM tag_keyword")} | EXTRA_KINDS
 
 
 def titles(item: dict) -> list[str]:
@@ -418,16 +426,21 @@ def suggest(conn: sqlite3.Connection, barcode: str, item: dict) -> dict[str, Any
         code = find_code(title)
         name = clean_title(title, names, code, kinds)
         real = {rec.norm(w) for w in name.split()} - kinds
+        said = {k for k in kinds if f" {k} " in f" {rec.norm(title)} "}
         # "Base, Layer, Contrast & Shade" is the whole range in one listing: it names no
         # colour, and its kinds are not this pot's tags
-        a_range = not real and len({k for k in kinds if f" {k} " in f" {rec.norm(title)} "}) > 1
+        a_range = not real and len(said) > 1
+        # a kind this pot goes over is not a kind this pot is
+        for_other = {rec.norm(m.group(1)) for m in CROSS_REFERENCE.finditer(title)} & kinds
+        tagged = rec._tag_ids(" ".join(said - for_other), keywords)
         return {"title": shown, "name": "" if a_range else name, "code": code,
-                "tag_ids": [] if a_range else rec._tag_ids(title, keywords),
+                "tag_ids": [] if a_range else tagged, "kinds": len(said - for_other),
                 "range": a_range, "real": bool(real)}
 
-    # the best listing: one that names a colour, then one that at least carries the code
+    # the best listing names a colour; of those, one with the maker's code, then the one
+    # that talks about the fewest kinds ("…Technical Paint" over "…Technical … For Base")
     reads = [read(title) for title in titles(item)] or [read("")]
-    best = max(reads, key=lambda r: (r["real"], bool(r["name"]), r["code"] is not None))
+    best = max(reads, key=lambda r: (r["real"], bool(r["name"]), r["code"] is not None, -r["kinds"]))
 
     return {
         "name": best["name"] or None,

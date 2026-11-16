@@ -190,6 +190,52 @@ def test_only_what_we_read_is_cached(client, monkeypatch):
         {"title": "Base - Balthasar Gold Citadel Paints"}]
 
 
+# a Citadel Technical pot: the main title sells the range together with brushes, and one
+# shop's title says what the pot goes over ("For Base") rather than what it is
+IRONCRUST = {
+    "ean": "5011921121243",
+    "title": "Citadel Paint - Technical, Dry and Paint Brushes - Games Workshop - Warhammer",
+    "brand": "Games Workshop",
+    "offers": [{"title": "GAW9918995604106 27-25 Martian Ironcrust Technical Paint"},
+               {"title": "Citadel Technical Martian Ironcrust 24 Ml Pot Paint For Base Games Workshop"}],
+}
+
+
+def _suggest(client, item, barcode="5011921121243"):
+    return client.get("/api/lookup/upcitemdb", params={"barcode": barcode}).json()["suggestion"]
+
+
+def test_technical_pot_keeps_only_its_own_kind(client, monkeypatch):
+    _answer(monkeypatch, data={"items": [IRONCRUST]})
+    s = _suggest(client, IRONCRUST)
+    tags = {t["id"]: t["name"] for t in client.get("/api/tags").json()}
+    assert (s["name"], s["code"]) == ("Martian Ironcrust", "27-25")
+    assert [tags[i] for i in s["tag_ids"]] == ["Спецэффект"]
+
+
+def test_a_kind_the_paint_goes_over_is_not_its_tag(client, monkeypatch):
+    """"…Technical Martian Ironcrust … Paint For Base": Base is what it covers, not what it is."""
+    _answer(monkeypatch, data={"items": [{"title": IRONCRUST["offers"][1]["title"], "brand": "Games Workshop"}]})
+    s = _suggest(client, None)
+    tags = {t["id"]: t["name"] for t in client.get("/api/tags").json()}
+    assert s["name"] == "Martian Ironcrust" and [tags[i] for i in s["tag_ids"]] == ["Спецэффект"]
+
+
+def test_a_title_selling_brushes_with_the_range_names_nothing(client, monkeypatch):
+    """"Technical, Dry and Paint Brushes" is a shelf, not a pot: no name, no tags."""
+    _answer(monkeypatch, data={"items": [{k: v for k, v in IRONCRUST.items() if k != "offers"}]})
+    s = _suggest(client, None)
+    assert s["name"] is None and s["tag_ids"] == [] and s["range_only"] is True
+
+
+def test_two_kinds_that_are_both_the_paints_own_are_kept(client, monkeypatch):
+    """Not every second kind is a cross-reference: an airbrush metallic really is both."""
+    _answer(monkeypatch, data={"items": [{"title": "Game Air Metallic Gold 17ml", "brand": "Vallejo"}]})
+    s = _suggest(client, None, "8429551727747")
+    tags = {t["id"]: t["name"] for t in client.get("/api/tags").json()}
+    assert sorted(tags[i] for i in s["tag_ids"]) == ["Для аэрографа", "Металлик"]
+
+
 def test_several_listings_the_one_with_a_name_wins(client, monkeypatch):
     nothing = {"title": "Citadel Base Paint Pot - Games Workshop - All Colors!", "brand": "Citadel Miniatures"}
     _answer(monkeypatch, data={"items": [nothing, MEPHISTON]})
