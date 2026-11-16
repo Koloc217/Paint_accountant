@@ -435,6 +435,8 @@ const SERVER_RU = [
     'В архиве нет paints.sqlite3 — это не копия Paint Accountant'],
   [/^the dump is from a newer version of the app \(schema (\d+), this app knows (\d+)\) — update the app first$/,
     'Копия сделана более новой версией приложения (схема $1, а эта знает $2) — сначала обновите приложение'],
+  [/^the dump can't be restored: it was made by an old version of the app \(schema (\d+);.*commit (\w+).*$/,
+    'Копия сделана старой версией приложения (схема $1). Восстановите её в приложении версии $2, сделайте там новую копию и загрузите её сюда'],
   [/^can't write (.*)$/, 'Не получилось записать $1'],
 ];
 

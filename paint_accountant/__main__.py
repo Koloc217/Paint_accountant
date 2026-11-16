@@ -8,7 +8,7 @@ from pathlib import Path
 import uvicorn
 
 from . import auth, backup, recognition
-from .db import OldSQLite, connect
+from .db import OldDatabase, OldSQLite, connect
 from .app import create_app
 from .netinfo import lan_ip
 from .config import (
@@ -62,7 +62,7 @@ def main(argv: list[str] | None = None) -> None:
             host=args.host, port=args.port, data_dir=args.data_dir, config_file=args.config
         )
         app = create_app(settings)
-    except (BadSetting, OldSQLite) as exc:
+    except (BadSetting, OldDatabase, OldSQLite) as exc:
         raise SystemExit(f"Can't start: {exc}")
     if args.reset_auth:
         conn = connect(settings.db_path)

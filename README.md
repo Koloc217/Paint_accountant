@@ -151,7 +151,7 @@ No build step and no external libraries — plain HTML, CSS and JavaScript in `p
 
 Every paint has two ids. `id` is a short number for this app's pages and API calls. `uuid` is given once when the paint is added and never changes, even when the database is rebuilt or merged: other apps (a project tracker, a script) should keep the `uuid` and look paints up by it.
 
-When a new version changes the database schema, the old file is copied first, next to it: `paints.before-v10.sqlite3` is the database as it was at schema 10. Delete these copies once the new version works for you.
+When a new version changes the database schema, the old file is copied first, next to it: `paints.before-v15.sqlite3` is the database as it was at schema 15. Delete these copies once the new version works for you. A database or a backup from before schema 15 can't be opened directly: start the app once as it was at commit `0ee8e28` (`git checkout 0ee8e28`) to bring it to schema 15, then update again.
 
 Full details at `/docs` on a running server.
 
