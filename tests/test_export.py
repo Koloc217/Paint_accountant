@@ -76,3 +76,21 @@ def test_english_download_and_empty(client):
 
 def test_bad_level_is_rejected(client):
     assert client.get("/api/export/paints.md", params={"level": "huge"}).status_code == 422
+
+
+def test_names_follow_the_language(client):
+    box = client.post("/api/storages", json={"name": "Тумба", "names": {"en": "Cabinet"}}).json()
+    tag = client.post("/api/tags", json={"name": "Глейз", "names": {"en": "Glaze"}}).json()
+    client.post("/api/paints", json={"name": "Lang Test", "manufacturer": "Kimera", "storage_id": box["id"],
+                                     "tag_ids": [tag["id"]]})
+    gone = client.post("/api/paints", json={"name": "Lang Gone", "manufacturer": "Kimera", "quantity": 0,
+                                            "tag_ids": [tag["id"]]})
+    assert gone.status_code == 201
+    for level in ("short", "full"):
+        en = client.get("/api/export/paints.md", params={"level": level, "lang": "en"}).text
+        ru = client.get("/api/export/paints.md", params={"level": level, "lang": "ru"}).text
+        assert "Glaze" in en and "Глейз" not in en and "Тумба" not in en, level
+        assert "Глейз" in ru and "Glaze" not in ru and "Cabinet" not in ru, level
+    full_en = client.get("/api/export/paints.md", params={"level": "full", "lang": "en"}).text
+    assert "Cabinet ×1" in full_en and "- Cabinet — paints 1, pots 1" in full_en
+    assert "Kimera Lang Gone — Glaze" in full_en  # the out-of-stock section too

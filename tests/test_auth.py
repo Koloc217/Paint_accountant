@@ -74,7 +74,7 @@ def test_new_password_signs_out_other_devices(app, client):
     with TestClient(app) as phone:
         phone.post("/api/auth/login", json={"password": "first"})
         assert phone.get("/api/paints").status_code == 200
-        r = client.post("/api/auth/password", json={"password": "second"})
+        r = client.post("/api/auth/password", json={"password": "second", "current": "first"})
         assert r.status_code == 200
         assert client.get("/api/paints").status_code == 200   # the device that changed it stays in
         assert phone.get("/api/paints").status_code == 401    # others sign in again
@@ -128,3 +128,19 @@ def test_reset_from_command_line(settings, app, client, capsys):
     assert "Sign-in is off" in capsys.readouterr().out
     with TestClient(app) as phone:
         assert phone.get("/api/paints").status_code == 200
+
+
+def test_changing_the_password_needs_the_current_one(client):
+    client.post("/api/auth/password", json={"password": "first"})
+    r = client.post("/api/auth/password", json={"password": "second"})
+    assert r.status_code == 403 and r.json()["detail"]["code"] == "wrong_password"
+    assert client.post("/api/auth/password", json={"password": "second", "current": "nope"}).status_code == 403
+    assert client.post("/api/auth/login", json={"password": "first"}).status_code == 200  # still the old one
+    assert client.post("/api/auth/password", json={"password": "second", "current": "first"}).status_code == 200
+
+
+def test_wrong_current_password_is_throttled_too(client):
+    client.post("/api/auth/password", json={"password": "first"})
+    for _ in range(auth.MAX_FAILS):
+        assert client.post("/api/auth/password", json={"password": "second", "current": "x"}).status_code == 403
+    assert client.post("/api/auth/password", json={"password": "second", "current": "first"}).status_code == 429

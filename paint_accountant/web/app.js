@@ -106,9 +106,9 @@ async function api(method, path, body) {
   if (!res.ok) {
     const d = data && data.detail;
     let msg = t('Ошибка {0}', res.status);
-    if (typeof d === 'string') msg = d;
+    if (typeof d === 'string') msg = serverText(d);
     else if (Array.isArray(d)) msg = d.map(e => (e.loc ? e.loc.slice(1).join('.') + ': ' : '') + e.msg).join('; ');
-    else if (d && typeof d === 'object') msg = d.message || msg;
+    else if (d && typeof d === 'object') msg = serverText(d.message) || msg;
     if (res.status === 401 && d && d.code === 'auth_required') goToLogin();
     throw new ApiError(res.status, msg, d && typeof d === 'object' && !Array.isArray(d) ? d : null);
   }
@@ -1509,7 +1509,7 @@ function photoRecognizer({ status, fill }) {
       if (!res.ok) {
         const d = data && data.detail;
         if (res.status === 401 && d && d.code === 'auth_required') goToLogin();
-        throw new ApiError(res.status, (typeof d === 'string' ? d : d && d.message) || t('Ошибка {0}', res.status));
+        throw new ApiError(res.status, serverText(typeof d === 'string' ? d : d && d.message) || t('Ошибка {0}', res.status));
       }
       show(localizeBuiltins(data));
     } catch (err) {
@@ -2147,10 +2147,14 @@ async function viewLogin(mount) {
   password.focus();
 }
 
-function passwordPair(onSubmit, buttonLabel) {
+function passwordPair(onSubmit, buttonLabel, askCurrent = false) {
+  const current = askCurrent
+    ? h('input', { class: 'input', type: 'password', id: 'p-current', autocomplete: 'current-password', required: true })
+    : null;
   const first = h('input', { class: 'input', type: 'password', id: 'p-new', autocomplete: 'new-password', minlength: 4, required: true });
   const again = h('input', { class: 'input', type: 'password', id: 'p-again', autocomplete: 'new-password', minlength: 4, required: true });
   const form = h('form', { class: 'form' },
+    current ? h('div', { class: 'field' }, h('label', { for: 'p-current' }, t('Текущий пароль')), current) : null,
     h('div', { class: 'field' }, h('label', { for: 'p-new' }, t('Новый пароль')), first,
       h('div', { class: 'hint' }, t('Не короче 4 символов'))),
     h('div', { class: 'field' }, h('label', { for: 'p-again' }, t('Ещё раз')), again),
@@ -2159,7 +2163,10 @@ function passwordPair(onSubmit, buttonLabel) {
     e.preventDefault();
     if (first.value !== again.value) { toast(t('Пароли не совпадают'), 'err'); again.focus(); return; }
     if (first.value.length < 4) { toast(t('Пароль короче 4 символов'), 'err'); first.focus(); return; }
-    try { await onSubmit(first.value); } catch (err) { toast(explain(err), 'err'); }
+    try { await onSubmit(first.value, current ? current.value : undefined); } catch (err) {
+      toast(explain(err), 'err');
+      if (current && err instanceof ApiError && err.status === 403) { current.value = ''; current.focus(); }
+    }
   });
   return form;
 }
@@ -2184,7 +2191,7 @@ function backupPanel() {
       const data = await res.json().catch(() => null);
       if (!res.ok) {
         const d = data && data.detail;
-        throw new Error(typeof d === 'string' ? d : t('Ошибка {0}', res.status));
+        throw new Error(typeof d === 'string' ? serverText(d) : t('Ошибка {0}', res.status));
       }
       toast(t('Каталог восстановлен: {0} красок', data.counts.paint), 'ok');
       setTimeout(() => { location.hash = '#/'; location.reload(); }, 900);
@@ -2200,7 +2207,7 @@ function backupPanel() {
       h('div', { class: 'hint' }, t('По производителям, с цветом, если он задан. Открывается в Excel и Google Таблицах. Только для чтения — обратно не загружается.'))),
     h('div', { class: 'field' },
       h('a', { class: 'btn', href: '/api/backup/dump', download: '' }, t('⬇ Полная копия (.zip)')),
-      h('div', { class: 'hint' }, t('Вся база и фото — чтобы перенести каталог на другой компьютер или вернуть после сбоя. Пароль входа тоже внутри.'))),
+      h('div', { class: 'hint' }, t('Вся база — чтобы перенести каталог на другой компьютер или вернуть после сбоя. Пароль входа тоже внутри.'))),
     h('div', { class: 'field' },
       h('div', null, restore, fileInput),
       h('div', { class: 'hint' }, t('Загрузите .zip, скачанный выше (здесь или на другом компьютере). Из консоли: '),
@@ -2353,11 +2360,11 @@ async function viewSettings(mount) {
       h('div', { class: 'row' }, logout, off),
       h('details', { class: 'sub-details' }, h('summary', null, t('Сменить пароль')),
         h('p', { class: 'muted small' }, t('После смены на остальных устройствах нужно будет войти заново.')),
-        passwordPair(async pw => {
-          await api('POST', '/auth/password', { password: pw });
+        passwordPair(async (pw, current) => {
+          await api('POST', '/auth/password', { password: pw, current });
           toast(t('Пароль изменён'), 'ok');
           render();
-        }, t('Сменить пароль'))));
+        }, t('Сменить пароль'), true)));
   }
 
   mount(h('div', null,

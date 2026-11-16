@@ -225,3 +225,45 @@ def test_uuid_is_given_on_insert_and_cannot_change(tmp_path):
             conn.execute("INSERT INTO paint (name, manufacturer_id, uuid) VALUES ('Again', ?, ?)",
                          (maker, uuids[1]))
     conn.close()
+
+
+def test_migration_16_tidies_saved_names(tmp_path):
+    path = tmp_path / "paints.sqlite3"
+    conn = db.connect(path)
+    conn.execute("PRAGMA foreign_keys = OFF")
+    for n, script in enumerate(db.MIGRATIONS[:15], start=1):
+        conn.executescript(f"BEGIN; {script} PRAGMA user_version = {n}; COMMIT;")
+    with conn:
+        conn.execute("INSERT INTO manufacturer (id, name) VALUES (50, ' Two  Thin Coats ')")
+        conn.executemany("INSERT INTO paint (id, name, manufacturer_id, code, barcode) VALUES (?, ?, 50, ?, ?)", [
+            (1, "  Nuln   Oil ", " 24-14 ", " 111 "),
+            (2, "Black", None, None),
+            (3, " black", None, None),          # tidied, it would repeat paint 2: left alone
+            (4, "\u200bЗелёный ", "  ", None),   # an invisible character; a blank code becomes none
+        ])
+        conn.execute("INSERT INTO storage (id, nfc_tag, at_hand) VALUES (9, ' 04:A2 ', 0)")
+        conn.executemany("INSERT INTO storage_name (storage_id, lang, name) VALUES (9, ?, ?)",
+                         [("ru", "  Коробка  9"), ("en", " Box 9 ")])
+        conn.execute("INSERT INTO tag (id, color) VALUES (90, '#112233')")
+        conn.executemany("INSERT INTO tag_name (tag_id, lang, name) VALUES (90, ?, ?)",
+                         [("ru", " Глейз "), ("en", "Glaze")])
+    conn.close()
+
+    db.init_db(path)
+    conn = db.connect(path)
+    assert conn.execute("SELECT name FROM manufacturer WHERE id = 50").fetchone()[0] == "Two Thin Coats"
+    rows = {r["id"]: (r["name"], r["code"], r["barcode"]) for r in conn.execute("SELECT * FROM paint")}
+    assert rows == {1: ("Nuln Oil", "24-14", "111"), 2: ("Black", None, None),
+                    3: (" black", None, None), 4: ("Зелёный", None, None)}
+    assert [r[0] for r in conn.execute("SELECT name FROM storage_name WHERE storage_id = 9 ORDER BY lang")] == \
+        ["Box 9", "Коробка 9"]
+    assert conn.execute("SELECT name FROM tag_name WHERE tag_id = 90 AND lang = 'ru'").fetchone()[0] == "Глейз"
+    assert conn.execute("SELECT nfc_tag FROM storage WHERE id = 9").fetchone()[0] == "04:A2"
+    conn.close()
+
+
+def test_old_sqlite_is_explained(monkeypatch, tmp_path):
+    monkeypatch.setattr(db.sqlite3, "sqlite_version_info", (3, 31, 1))
+    monkeypatch.setattr(db.sqlite3, "sqlite_version", "3.31.1")
+    with pytest.raises(db.OldSQLite, match="SQLite 3.31.1, the app needs 3.35"):
+        db.init_db(tmp_path / "paints.sqlite3")

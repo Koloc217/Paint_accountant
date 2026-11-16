@@ -109,13 +109,9 @@ def test_dump_moves_everything_to_another_machine(client, tmp_path):
         old.close()
 
 
-def test_dump_includes_photos(client, tmp_path):
-    settings = client.app.state.settings
-    (settings.photos_dir / "p1.jpg").write_bytes(b"jpeg")
-    data = client.get("/api/backup/dump").content
-    with _client(tmp_path / "b") as other:
-        assert other.post("/api/backup/restore", content=data).status_code == 200
-        assert (other.app.state.settings.photos_dir / "p1.jpg").read_bytes() == b"jpeg"
+def test_dump_holds_only_the_database(client):
+    with zipfile.ZipFile(io.BytesIO(client.get("/api/backup/dump").content)) as z:
+        assert sorted(z.namelist()) == ["manifest.json", "paints.sqlite3"]
 
 
 def test_older_schema_is_upgraded_on_restore(client, tmp_path):
@@ -172,13 +168,34 @@ def test_restore_rejects_foreign_and_newer_databases(client, tmp_path):
     assert client.post("/api/backup/restore", content=_zip(readme="x")).status_code == 422
 
 
-def test_restore_rejects_paths_outside_photos(client):
+def test_restore_takes_only_the_database_out_of_the_archive(client, tmp_path):
+    # dumps of earlier versions carried a photos/ folder; nothing but the database is unpacked,
+    # so a path that climbs out of the archive has nowhere to land
     dump = client.get("/api/backup/dump").content
     with zipfile.ZipFile(io.BytesIO(dump)) as z:
         dbdata = z.read("paints.sqlite3")
-    bad = _zip(**{"paints.sqlite3": dbdata, "photos/../../evil.txt": "x"})
-    r = client.post("/api/backup/restore", content=bad)
-    assert r.status_code == 422 and "unsafe" in r.text
+    old = _zip(**{"paints.sqlite3": dbdata, "photos/p1.jpg": "jpeg", "photos/../../evil.txt": "x"})
+    with _client(tmp_path / "b") as other:
+        assert other.post("/api/backup/restore", content=old).status_code == 200
+        data_dir = other.app.state.settings.data_dir
+        assert not (data_dir / "photos").exists()
+        assert not list(tmp_path.rglob("evil.txt"))
+
+
+def test_too_large_upload_is_refused_by_its_declared_size(client):
+    r = client.post("/api/backup/restore", content=b"x",
+                    headers={"Content-Length": str(backup.MAX_DUMP_BYTES + 1)})
+    assert r.status_code == 413
+
+
+def test_too_large_upload_is_refused_while_it_arrives(client, monkeypatch):
+    monkeypatch.setattr(backup, "MAX_DUMP_BYTES", 1000)
+
+    def chunks():  # no Content-Length: the size is only known as the body comes
+        for _ in range(5):
+            yield b"x" * 400
+
+    assert client.post("/api/backup/restore", content=chunks()).status_code == 413
 
 
 def test_backup_needs_sign_in_when_enabled(client):

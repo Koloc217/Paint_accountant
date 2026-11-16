@@ -260,7 +260,57 @@ MIGRATIONS: list[str] = [
     None,
     # 15 — storages get a name per interface language too (storage_name); storage.name goes away.
     None,
+    # 16 — names saved with spaces around them (" Nuln Oil"), doubled spaces or invisible
+    #      characters are tidied, as new ones are on saving. A name that would then repeat
+    #      another one is left as it is (merge such paints by hand).
+    """
+    UPDATE OR IGNORE manufacturer SET name = py_clean(name)
+        WHERE name != py_clean(name) AND py_clean(name) != ''
+          AND NOT EXISTS (SELECT 1 FROM manufacturer x
+                          WHERE x.id != manufacturer.id AND py_lower(x.name) = py_lower(py_clean(manufacturer.name)));
+    UPDATE OR IGNORE paint SET code = nullif(py_clean(code), '')
+        WHERE code IS NOT NULL AND code != py_clean(code)
+          AND NOT EXISTS (SELECT 1 FROM paint x
+                          WHERE x.id != paint.id AND x.manufacturer_id = paint.manufacturer_id
+                            AND py_lower(x.name) = py_lower(paint.name)
+                            AND py_lower(ifnull(x.code, '')) = py_lower(py_clean(paint.code)));
+    UPDATE OR IGNORE paint SET name = py_clean(name)
+        WHERE name != py_clean(name) AND py_clean(name) != ''
+          AND NOT EXISTS (SELECT 1 FROM paint x
+                          WHERE x.id != paint.id AND x.manufacturer_id = paint.manufacturer_id
+                            AND py_lower(x.name) = py_lower(py_clean(paint.name))
+                            AND py_lower(ifnull(x.code, '')) = py_lower(ifnull(paint.code, '')));
+    UPDATE OR IGNORE paint SET barcode = nullif(py_clean(barcode), '')
+        WHERE barcode IS NOT NULL AND barcode != py_clean(barcode);
+    UPDATE OR IGNORE tag_name SET name = py_clean(name)
+        WHERE name != py_clean(name) AND py_clean(name) != ''
+          AND NOT EXISTS (SELECT 1 FROM tag_name x WHERE x.tag_id != tag_name.tag_id AND x.lang = tag_name.lang
+                            AND py_lower(x.name) = py_lower(py_clean(tag_name.name)));
+    UPDATE OR IGNORE storage_name SET name = py_clean(name)
+        WHERE name != py_clean(name) AND py_clean(name) != ''
+          AND NOT EXISTS (SELECT 1 FROM storage_name x WHERE x.storage_id != storage_name.storage_id
+                            AND x.lang = storage_name.lang
+                            AND py_lower(x.name) = py_lower(py_clean(storage_name.name)));
+    UPDATE storage SET nfc_tag = nullif(py_clean(nfc_tag), '')
+        WHERE nfc_tag IS NOT NULL AND nfc_tag != py_clean(nfc_tag);
+    """,
 ]
+
+# ALTER TABLE … DROP COLUMN (migration 15) appeared in SQLite 3.35 (2021)
+MIN_SQLITE = (3, 35, 0)
+
+
+class OldSQLite(RuntimeError):
+    """The SQLite library this Python uses is too old for the app's database."""
+
+
+def check_sqlite() -> None:
+    if sqlite3.sqlite_version_info < MIN_SQLITE:
+        need = ".".join(map(str, MIN_SQLITE[:2]))
+        raise OldSQLite(
+            f"This Python comes with SQLite {sqlite3.sqlite_version}, the app needs {need} or newer. "
+            "Use a newer Python (python.org builds for Windows carry their own SQLite) or update the system."
+        )
 
 # Starter tags: (name, plaque color, label keywords)
 STARTER_TAGS: list[tuple[str, str, list[str]]] = [
@@ -360,6 +410,7 @@ def connect(db_path: Path) -> sqlite3.Connection:
 
 def init_db(db_path: Path) -> None:
     """Create the data folder and database if needed, apply pending migrations."""
+    check_sqlite()
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = connect(db_path)
     try:
