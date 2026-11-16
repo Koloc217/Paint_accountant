@@ -949,6 +949,89 @@ def merge_paints(conn: sqlite3.Connection, keep_id: int, from_id: int, barcode: 
     return get_paint(conn, keep_id)
 
 
+# ======================= statistics =======================
+
+def stats(conn: sqlite3.Connection) -> dict:
+    """Numbers about the whole catalog: where the pots are, what repeats, what needs tidying."""
+    def one(sql: str) -> int:
+        return conn.execute(sql).fetchone()[0]
+
+    paints = one("SELECT count(*) FROM paint")
+    pots = one("SELECT coalesce(sum(quantity), 0) FROM paint_location")
+    in_stock = one("SELECT count(DISTINCT paint_id) FROM paint_location")
+
+    # where the pots lie: busiest storage first, empty ones last
+    snames = _storage_names(conn)
+    storages = [
+        _with_names({"id": r["id"], "at_hand": bool(r["at_hand"]), "is_default": bool(r["is_default"]),
+                     "paints": r["paints"], "pots": r["pots"]}, snames)
+        for r in conn.execute(
+            """SELECT s.id, s.at_hand, s.is_default, count(l.paint_id) AS paints,
+                      coalesce(sum(l.quantity), 0) AS pots
+               FROM storage s LEFT JOIN paint_location l ON l.storage_id = s.id
+               GROUP BY s.id ORDER BY pots DESC, s.id""")
+    ]
+    loose = conn.execute(
+        "SELECT count(*) AS paints, coalesce(sum(quantity), 0) AS pots FROM paint_location WHERE storage_id IS NULL"
+    ).fetchone()
+
+    # one paint, several pots
+    repeated = [dict(r) for r in conn.execute(
+        """SELECT p.id, p.name, p.code, p.hex, m.name AS manufacturer,
+                  sum(l.quantity) AS pots, count(*) AS places
+           FROM paint p JOIN manufacturer m ON m.id = p.manufacturer_id
+           JOIN paint_location l ON l.paint_id = p.id
+           GROUP BY p.id HAVING pots >= 2 ORDER BY pots DESC, p.name LIMIT 10""")]
+    rep_paints, rep_extra = conn.execute(
+        """SELECT count(*), coalesce(sum(pots - 1), 0)
+           FROM (SELECT sum(quantity) AS pots FROM paint_location GROUP BY paint_id HAVING pots >= 2)"""
+    ).fetchone()
+    spread = one("SELECT count(*) FROM (SELECT 1 FROM paint_location GROUP BY paint_id HAVING count(*) > 1)")
+
+    # probably the same paint entered twice: same manufacturer and name, another code or barcode
+    groups: dict[tuple[int, str], list[dict]] = {}
+    for r in conn.execute(
+        """SELECT p.id, p.manufacturer_id, m.name AS manufacturer, p.name, p.code, p.barcode,
+                  coalesce((SELECT sum(quantity) FROM paint_location WHERE paint_id = p.id), 0) AS pots
+           FROM paint p JOIN manufacturer m ON m.id = p.manufacturer_id ORDER BY p.id"""):
+        groups.setdefault((r["manufacturer_id"], _paint_key(r["name"])), []).append(dict(r))
+    twins = [{"manufacturer": g[0]["manufacturer"], "name": g[0]["name"],
+              "paints": [{k: x[k] for k in ("id", "code", "barcode", "pots")} for x in g]}
+             for g in groups.values() if len(g) > 1]
+    twins.sort(key=lambda g: (g["manufacturer"].lower(), g["name"].lower()))
+
+    makers = [dict(r) for r in conn.execute(
+        """SELECT m.id, m.name, count(DISTINCT p.id) AS paints, coalesce(sum(l.quantity), 0) AS pots
+           FROM manufacturer m JOIN paint p ON p.manufacturer_id = m.id
+           LEFT JOIN paint_location l ON l.paint_id = p.id
+           GROUP BY m.id ORDER BY pots DESC, paints DESC, m.name LIMIT 8""")]
+
+    tnames = _tag_names(conn)
+    tags = [_with_names(dict(r), tnames) for r in conn.execute(
+        """SELECT t.id, t.color, count(pt.paint_id) AS paints
+           FROM tag t JOIN paint_tag pt ON pt.tag_id = t.id GROUP BY t.id ORDER BY paints DESC, t.id""")]
+
+    return {
+        "totals": {
+            "paints": paints, "pots": pots, "in_stock": in_stock, "out_of_stock": paints - in_stock,
+            "storages": len(storages), "manufacturers": one("SELECT count(DISTINCT manufacturer_id) FROM paint"),
+        },
+        "storages": storages,
+        "empty_storages": sum(1 for x in storages if x["pots"] == 0),
+        "without_storage": {"paints": loose["paints"], "pots": loose["pots"]},
+        "repeated": {"paints": rep_paints, "extra_pots": rep_extra, "top": repeated, "spread": spread},
+        "possible_duplicates": twins[:20],
+        "possible_duplicates_total": len(twins),
+        "manufacturers": makers,
+        "tags": tags,
+        "tidy": {
+            "no_tag": one("SELECT count(*) FROM paint p WHERE NOT EXISTS (SELECT 1 FROM paint_tag WHERE paint_id = p.id)"),
+            "no_color": one("SELECT count(*) FROM paint WHERE hex IS NULL"),
+            "no_barcode": one("SELECT count(*) FROM paint WHERE barcode IS NULL"),
+        },
+    }
+
+
 def delete_paint(conn: sqlite3.Connection, paint_id: int) -> None:
     with conn:
         if conn.execute("DELETE FROM paint WHERE id = ?", (paint_id,)).rowcount == 0:

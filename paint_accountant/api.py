@@ -119,6 +119,12 @@ def qr_code(data: str = Query(..., min_length=1, max_length=500, description="te
 
 # ---------------- paints ----------------
 
+@router.get("/stats", tags=["stats"])
+def stats(conn: sqlite3.Connection = Conn) -> dict:
+    """Totals, busiest storages, paints with several pots, probable duplicate records, breakdown by manufacturer and tag."""
+    return repo.stats(conn)
+
+
 @router.get("/paints", response_model=list[Paint], tags=["paints"])
 def list_paints(
     q: str | None = Query(None, description="search in name, manufacturer and code"),
