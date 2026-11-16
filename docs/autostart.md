@@ -181,7 +181,7 @@ Start-ScheduledTask -TaskName "Paint Accountant"
    **⚙ Settings → Restore from a backup…**, or in a console
    `python run.py --restore paint-accountant-YYYY-MM-DD.zip`.
 
-The backup holds all paints, storages, tags, manufacturers, photos and the login password
+The backup holds all paints, storages, tags, manufacturers and the login password
 (if one was set). Before replacing, the new computer's current database is saved in the
 `data/` folder as `paints.before-restore-<date>.sqlite3`.
 

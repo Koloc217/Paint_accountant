@@ -19,8 +19,22 @@ WEB_DIR = Path(__file__).resolve().parent / "web"
 
 def _asset_version() -> str:
     """Changes whenever a web file changes, so phones don't keep stale JS/CSS."""
-    newest = max(int(p.stat().st_mtime) for p in WEB_DIR.iterdir() if p.is_file())
+    newest = max(int(p.stat().st_mtime) for p in WEB_DIR.rglob("*") if p.is_file())
     return f"{__version__}-{newest}"
+
+
+class _WebFiles(StaticFiles):
+    """The page's files, always checked with the server before use ("no-cache").
+
+    app.js loads the other scripts by plain names (import './js/core.js'), so the ?v= mark
+    of the page can't reach them. Without this a phone could run a new app.js with an old
+    module after an update. The check is cheap: an unchanged file is answered with 304.
+    """
+
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -39,7 +53,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def number_too_large(request: Request, exc: OverflowError) -> JSONResponse:
         # an id or count beyond SQLite's 64-bit integers (/api/paints/99999999999999999999)
         return JSONResponse({"detail": "number is too large"}, status_code=422)
-    app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
+    app.mount("/static", _WebFiles(directory=WEB_DIR), name="static")
 
     @app.get("/", include_in_schema=False)
     def index() -> HTMLResponse:

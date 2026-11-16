@@ -64,8 +64,21 @@ def logout(response: Response) -> dict:
 
 
 @router.post("/password")
-def set_password(body: NewPasswordIn, response: Response, conn: sqlite3.Connection = Conn) -> dict:
-    """Turn sign-in on, or change the password. Other devices will have to sign in again."""
+def set_password(body: NewPasswordIn, request: Request, response: Response,
+                 conn: sqlite3.Connection = Conn) -> dict:
+    """Turn sign-in on, or change the password. Other devices will have to sign in again.
+    Changing needs the password in use now (`current`), so a phone left unlocked isn't enough."""
+    if auth.enabled(conn):
+        throttle: auth.Throttle = request.app.state.throttle
+        who = _client(request)
+        wait = throttle.wait_seconds(who)
+        if wait:
+            raise HTTPException(429, {"code": "too_many_attempts", "wait": wait,
+                                      "message": f"too many wrong passwords, wait {wait} s"})
+        if not auth.check_password(conn, body.current or ""):
+            throttle.failed(who)
+            raise HTTPException(403, {"code": "wrong_password", "message": "wrong password"})
+        throttle.succeeded(who)
     auth.set_password(conn, body.password)
     _set_cookie(response, conn)  # this device stays signed in
     return {"enabled": True, "signed_in": True}

@@ -8,6 +8,8 @@ import re
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from .textclean import clean_text
+
 _HEX_RE = re.compile(r"^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 
 
@@ -30,8 +32,25 @@ def normalize_hex(value: str | None) -> str | None:
 def _strip_or_none(value: str | None) -> str | None:
     if value is None:
         return None
-    value = value.strip()
+    value = clean_text(value)
     return value or None
+
+
+def _clean_required(value: str) -> str:
+    """A name: tidied, and it must still have something in it."""
+    value = clean_text(value)
+    if not value:
+        raise ValueError("must not be empty")
+    return value
+
+
+def _clean_optional(value: str | None) -> str | None:
+    """A name in a PATCH: null means "not sent"; a sent one must not be blank."""
+    return None if value is None else _clean_required(value)
+
+
+def _clean_names(value: dict | None) -> dict | None:
+    return None if value is None else {lang: clean_text(name) for lang, name in value.items()}
 
 
 # names of a tag or a storage per interface language
@@ -45,20 +64,14 @@ class StorageIn(BaseModel):
 
     name: str = Field(min_length=1, max_length=100)
     names: Names | None = None
-    nfc_tag: str | None = None
+    nfc_tag: str | None = Field(default=None, max_length=100, description="a note about the label, for yourself")
     at_hand: bool = False
     is_default: bool = False
     copies_storage_id: int | None = None
 
     _strip = field_validator("nfc_tag")(_strip_or_none)
-
-    @field_validator("name")
-    @classmethod
-    def _name(cls, v: str) -> str:
-        v = v.strip()
-        if not v:
-            raise ValueError("name must not be empty")
-        return v
+    _name = field_validator("name", mode="before")(_clean_required)
+    _names = field_validator("names", mode="before")(_clean_names)
 
 
 class StoragePatch(BaseModel):
@@ -69,12 +82,14 @@ class StoragePatch(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=100)
     lang: Literal["ru", "en"] | None = None
     names: Names | None = None
-    nfc_tag: str | None = None
+    nfc_tag: str | None = Field(default=None, max_length=100)
     at_hand: bool | None = None
     is_default: bool | None = None
     copies_storage_id: int | None = None
 
     _strip = field_validator("nfc_tag")(_strip_or_none)
+    _name = field_validator("name", mode="before")(_clean_optional)
+    _names = field_validator("names", mode="before")(_clean_names)
 
 
 class StorageName(BaseModel):
@@ -104,6 +119,9 @@ class TagIn(BaseModel):
     names: Names | None = None
     color: str = "#888888"
 
+    _name = field_validator("name", mode="before")(_clean_required)
+    _names = field_validator("names", mode="before")(_clean_names)
+
     @field_validator("color")
     @classmethod
     def _color(cls, v: str) -> str:
@@ -117,6 +135,9 @@ class TagPatch(BaseModel):
     lang: Literal["ru", "en"] | None = None
     names: Names | None = None
     color: str | None = None
+
+    _name = field_validator("name", mode="before")(_clean_optional)
+    _names = field_validator("names", mode="before")(_clean_names)
 
     @field_validator("color")
     @classmethod
@@ -138,13 +159,7 @@ class Tag(BaseModel):
 class ManufacturerIn(BaseModel):
     name: str = Field(min_length=1, max_length=100)
 
-    @field_validator("name")
-    @classmethod
-    def _name(cls, v: str) -> str:
-        v = v.strip()
-        if not v:
-            raise ValueError("name must not be empty")
-        return v
+    _name = field_validator("name", mode="before")(_clean_required)
 
 
 class Manufacturer(BaseModel):
@@ -171,16 +186,10 @@ class PaintIn(BaseModel):
     allow_duplicate: bool = Field(False, description="allow several pots of this paint in an 'at hand' storage")
     tag_ids: list[int] = []
 
+    _name = field_validator("name", mode="before")(_clean_required)
+    _maker = field_validator("manufacturer", mode="before")(clean_text)
     _strip_code = field_validator("code", "barcode")(_strip_or_none)
     _hex = field_validator("hex")(normalize_hex)
-
-    @field_validator("name")
-    @classmethod
-    def _required_text(cls, v: str) -> str:
-        v = v.strip()
-        if not v:
-            raise ValueError("must not be empty")
-        return v
 
     @model_validator(mode="after")
     def _need_manufacturer(self) -> "PaintIn":
@@ -200,6 +209,8 @@ class PaintPatch(BaseModel):
     hex: str | None = None
     tag_ids: list[int] | None = None
 
+    _name = field_validator("name", mode="before")(_clean_optional)
+    _maker = field_validator("manufacturer", mode="before")(_clean_optional)
     _strip_code = field_validator("code", "barcode")(_strip_or_none)
     _hex = field_validator("hex")(normalize_hex)
 
@@ -295,6 +306,8 @@ class PasswordIn(BaseModel):
 
 class NewPasswordIn(BaseModel):
     password: str = Field(..., min_length=4, max_length=200, description="at least 4 characters")
+    current: str | None = Field(None, max_length=200,
+                                description="the password in use now — needed to change it, not to turn sign-in on")
 
 
 class LanguageIn(BaseModel):

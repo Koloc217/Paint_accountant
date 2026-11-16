@@ -1,4 +1,4 @@
-"""Upgrading a database made by an older version keeps the user's data."""
+"""The database: a new one, one from the version before, and ones this app can't open."""
 
 from __future__ import annotations
 
@@ -7,57 +7,114 @@ import sqlite3
 import pytest
 
 from paint_accountant import db
+from paint_accountant.__main__ import main
+
+_UUID_RE = r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 
 
-def _make_v1(path):
+def _baseline(path) -> sqlite3.Connection:
+    """A database as the app made it before the migrations that follow the baseline."""
     conn = db.connect(path)
-    conn.executescript(f"BEGIN; {db.MIGRATIONS[0]} PRAGMA user_version = 1; COMMIT;")
-    db._seed_tags(conn)
-    with conn:
-        conn.execute("INSERT INTO storage (id, name) VALUES (1, 'Коробка 1')")
-        conn.executemany(
-            "INSERT INTO paint (id, name, manufacturer, code, hex, quantity, storage_id) VALUES (?,?,?,?,?,?,?)",
-            [
-                (1, "Nuln Oil", "Citadel", "24-14", "#1d1d1d", 2, 1),
-                (2, "Mephiston Red", "citadel ", None, None, 1, None),  # other spelling of an existing one
-                (3, "Изумрудный", "Кимера", None, None, 0, 1),            # name not in the starter list
-                (4, "Black", "кимера", None, None, 1, None),
-            ],
-        )
-        conn.execute("INSERT INTO paint_tag (paint_id, tag_id) VALUES (1, 5)")
+    db._create(conn)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.BASELINE_VERSION
+    return conn
+
+
+def test_versions_add_up():
+    assert db.BASELINE_VERSION == 15  # the number is in users' files: it can't be moved
+    assert db.SCHEMA_VERSION == db.BASELINE_VERSION + len(db.MIGRATIONS)
+
+
+def test_fresh_database_starts_with_the_starter_data(tmp_path):
+    path = tmp_path / "paints.sqlite3"
+    db.init_db(path)
+    conn = db.connect(path)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+    assert [r[0] for r in conn.execute("SELECT name FROM manufacturer ORDER BY id")] == db.STARTER_MANUFACTURERS
+    tags = conn.execute("""SELECT t.id, ru.name, en.name, t.color FROM tag t
+                           JOIN tag_name ru ON ru.tag_id = t.id AND ru.lang = 'ru'
+                           JOIN tag_name en ON en.tag_id = t.id AND en.lang = 'en' ORDER BY t.id""").fetchall()
+    assert [tuple(r) for r in tags] == [(i, ru, en, color) for i, (ru, en, color, _) in enumerate(db.STARTER_TAGS, 1)]
+    assert tuple(tags[0]) == (1, "Грунт", "Primer", "#9e9e9e") and tags[10][1] == "Техническая"
+    words = {(r[0], r[1]) for r in conn.execute("SELECT keyword, tag_id FROM tag_keyword")}
+    assert {("primer", 1), ("accent", 5), ("pigment", 6), ("quickshade", 8), ("revitalizer", 11)} <= words
+    assert len(words) == sum(len(kws) for *_, kws in db.STARTER_TAGS) == 37
+    assert [tuple(r) for r in conn.execute("SELECT lang, name FROM storage_name ORDER BY lang")] == \
+        [("en", "At hand"), ("ru", "Под рукой")]
+    assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+    assert conn.execute("SELECT count(*) FROM paint").fetchone()[0] == 0
     conn.close()
 
 
-def test_v1_to_v2_keeps_paints_tags_and_storages(tmp_path):
+def test_database_of_the_previous_version_is_upgraded_and_copied_first(tmp_path):
     path = tmp_path / "paints.sqlite3"
-    _make_v1(path)
+    conn = _baseline(path)
+    with conn:
+        conn.execute("INSERT INTO paint (id, name, manufacturer_id, code) VALUES (1, ' Nuln  Oil', 2, '24-14')")
+        conn.execute("INSERT INTO paint_location (paint_id, storage_id, quantity) VALUES (1, 1, 2)")
+        conn.execute("INSERT INTO paint_tag (paint_id, tag_id) VALUES (1, 5)")
+    uuid = conn.execute("SELECT uuid FROM paint").fetchone()[0]
+    conn.close()
 
     db.init_db(path)
-
     conn = db.connect(path)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == len(db.MIGRATIONS)
-    rows = conn.execute(
-        "SELECT p.id, p.name, m.name AS maker, coalesce(sum(l.quantity), 0), max(l.storage_id) FROM paint p "
-        "JOIN manufacturer m ON m.id = p.manufacturer_id LEFT JOIN paint_location l ON l.paint_id = p.id "
-        "GROUP BY p.id ORDER BY p.id"
-    ).fetchall()
-    assert [tuple(r) for r in rows] == [
-        (1, "Nuln Oil", "Citadel", 2, 1),
-        (2, "Mephiston Red", "Citadel", 1, None),
-        (3, "Изумрудный", "Кимера", 0, None),  # used up: no pots, so no place either
-        (4, "Black", "Кимера", 1, None),
-    ]
-    # tag link survived the table rebuild
-    assert conn.execute("SELECT count(*) FROM paint_tag").fetchone()[0] == 1
-    makers = [r[0] for r in conn.execute("SELECT name FROM manufacturer ORDER BY id")]
-    assert makers[:7] == ["AK", "Citadel", "Green Stuff World", "Kaleido", "Kimera", "Tamiya", "Vallejo"]
-    assert makers.count("Кимера") == 1
-    assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+    assert tuple(conn.execute("SELECT name, code, uuid FROM paint").fetchone()) == ("Nuln Oil", "24-14", uuid)
+    assert conn.execute("SELECT quantity FROM paint_location WHERE paint_id = 1").fetchone()[0] == 2
+    assert conn.execute("SELECT tag_id FROM paint_tag WHERE paint_id = 1").fetchone()[0] == 5
+    conn.close()
+    # the file as it was is kept next to it
+    backup = tmp_path / f"paints.before-v{db.BASELINE_VERSION}.sqlite3"
+    old = sqlite3.connect(backup)
+    assert old.execute("PRAGMA user_version").fetchone()[0] == db.BASELINE_VERSION
+    assert old.execute("SELECT name FROM paint").fetchone()[0] == " Nuln  Oil"
+    old.close()
+    db.init_db(path)  # nothing more to do the second time
+    assert len(list(tmp_path.glob("*.before-*"))) == 1
+
+
+@pytest.mark.parametrize("version", [1, 4, 10, 14])
+def test_database_from_before_the_baseline_is_refused_untouched(tmp_path, version):
+    path = tmp_path / "paints.sqlite3"
+    conn = sqlite3.connect(path)
+    conn.executescript(f"CREATE TABLE paint (id INTEGER PRIMARY KEY, name TEXT); INSERT INTO paint VALUES (1, 'Old');"
+                       f"PRAGMA user_version = {version};")
+    conn.close()
+    before = path.read_bytes()
+    with pytest.raises(db.OldDatabase, match=rf"schema {version}; this app upgrades from 15.*{db.LAST_WITH_OLD_MIGRATIONS}"):
+        db.init_db(path)
+    conn = sqlite3.connect(path)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == version
+    assert conn.execute("SELECT name FROM paint").fetchall() == [("Old",)]
+    conn.close()
+    assert not list(tmp_path.glob("*.before-*"))
+    # from the command line: one plain line, no traceback
+    with pytest.raises(SystemExit) as exit_:
+        main(["--data-dir", str(tmp_path), "--config", str(tmp_path / "none.ini")])
+    assert "Can't start" in str(exit_.value) and "old version of the app" in str(exit_.value)
+    assert before[:16] == path.read_bytes()[:16]
+
+
+def test_some_other_sqlite_file_is_refused(tmp_path):
+    path = tmp_path / "paints.sqlite3"
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE notes (id INTEGER PRIMARY KEY)")  # user_version 0, but not empty
+    conn.close()
+    with pytest.raises(RuntimeError, match="not a Paint Accountant database"):
+        db.init_db(path)
+    conn = sqlite3.connect(path)
+    assert [r[0] for r in conn.execute("SELECT name FROM sqlite_master")] == ["notes"]
     conn.close()
 
-    db.init_db(path)  # second start: nothing changes, nothing duplicated
-    conn = db.connect(path)
-    assert conn.execute("SELECT count(*) FROM manufacturer").fetchone()[0] == len(makers)
+
+def test_failed_creation_leaves_no_half_made_database(tmp_path, monkeypatch):
+    path = tmp_path / "paints.sqlite3"
+    monkeypatch.setattr(db, "STARTER_MANUFACTURERS", ["AK", "ak"])  # breaks the unique index midway
+    with pytest.raises(sqlite3.IntegrityError):
+        db.init_db(path)
+    conn = sqlite3.connect(path)
+    assert conn.execute("SELECT count(*) FROM sqlite_master").fetchone()[0] == 0
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 0
     conn.close()
 
 
@@ -68,34 +125,6 @@ def test_newer_database_is_refused(tmp_path):
     conn.close()
     with pytest.raises(RuntimeError, match="newer version"):
         db.init_db(path)
-
-
-def test_v3_to_v4_moves_pots_into_locations_and_picks_default(tmp_path):
-    path = tmp_path / "paints.sqlite3"
-    conn = db.connect(path)
-    for n, script in enumerate(db.MIGRATIONS[:3], start=1):
-        conn.executescript(f"BEGIN; {script} PRAGMA user_version = {n}; COMMIT;")
-    with conn:
-        conn.execute("INSERT INTO storage (id, name) VALUES (1, 'Коробка 1')")
-        conn.execute("INSERT INTO storage (id, name, at_hand) VALUES (2, 'Ящик у стола', 1)")
-        citadel = conn.execute("SELECT id FROM manufacturer WHERE name = 'Citadel'").fetchone()[0]
-        conn.executemany(
-            "INSERT INTO paint (id, name, manufacturer_id, quantity, storage_id, barcode) VALUES (?,?,?,?,?,?)",
-            [(1, "Nuln Oil", citadel, 3, 1, "501"), (2, "Leadbelcher", citadel, 1, 2, None),
-             (3, "Abaddon Black", citadel, 0, 1, None), (4, "Retributor", citadel, 2, None, None)],
-        )
-    conn.close()
-
-    db.init_db(path)
-
-    conn = db.connect(path)
-    locs = {tuple(r) for r in conn.execute("SELECT paint_id, storage_id, quantity FROM paint_location")}
-    assert locs == {(1, 1, 3), (2, 2, 1), (4, None, 2)}  # used-up paint has no pots anywhere
-    # the existing "at hand" storage became the default, no extra one was created
-    storages = [tuple(r) for r in conn.execute("SELECT id, (SELECT name FROM storage_name WHERE storage_id = storage.id AND lang = 'ru'), at_hand, is_default FROM storage ORDER BY id")]
-    assert storages == [(1, "Коробка 1", 0, 0), (2, "Ящик у стола", 1, 1)]
-    assert conn.execute("SELECT barcode FROM paint WHERE id = 1").fetchone()[0] == "501"
-    conn.close()
 
 
 def test_fresh_database_has_default_at_hand_storage(tmp_path):
@@ -115,83 +144,6 @@ def test_technical_tag_added_once_with_keywords(tmp_path):
     assert len(rows) == 1
     kws = {r[0] for r in conn.execute("SELECT keyword FROM tag_keyword WHERE tag_id = ?", (rows[0][0],))}
     assert {"medium", "thinner", "retarder"} <= kws
-    conn.close()
-
-
-def test_technical_tag_not_duplicated_if_user_made_one(tmp_path):
-    path = tmp_path / "paints.sqlite3"
-    conn = db.connect(path)
-    for n, script in enumerate(db.MIGRATIONS[:4], start=1):
-        conn.executescript(f"BEGIN; {script} PRAGMA user_version = {n}; COMMIT;")
-        if n == 1:
-            db._seed_tags(conn)
-    with conn:
-        conn.execute("INSERT INTO tag (name, color) VALUES ('техническая', '#123456')")
-    conn.close()
-    db.init_db(path)
-    conn = db.connect(path)
-    assert conn.execute("SELECT count(*) FROM tag_name WHERE lang = 'ru' AND lower(name) LIKE '%ическая'").fetchone()[0] == 1
-    conn.close()
-
-
-_UUID_RE = r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-
-
-def _make_v10_with_paints(path):
-    conn = db.connect(path)
-    for n, script in enumerate(db.MIGRATIONS[:10], start=1):
-        conn.executescript(f"BEGIN; {script} PRAGMA user_version = {n}; COMMIT;")
-        if n == 1:
-            db._seed_tags(conn)
-    with conn:
-        citadel = conn.execute("SELECT id FROM manufacturer WHERE name = 'Citadel'").fetchone()[0]
-        box = conn.execute("INSERT INTO storage (name) VALUES ('Коробка 1')").lastrowid
-        conn.executemany(
-            "INSERT INTO paint (id, name, manufacturer_id, code, barcode, hex) VALUES (?,?,?,?,?,?)",
-            [(1, "Nuln Oil", citadel, "24-14", "501", "#1d1d1d"), (2, "Leadbelcher", citadel, None, None, None),
-             (7, "Retributor", citadel, None, None, None)],  # ids with a gap stay as they are
-        )
-        conn.executemany("INSERT INTO paint_location (paint_id, storage_id, quantity) VALUES (?,?,?)",
-                         [(1, box, 2), (7, None, 1)])
-        conn.execute("INSERT INTO paint_tag (paint_id, tag_id) VALUES (1, 5)")
-    conn.close()
-
-
-def test_v10_to_v11_gives_every_paint_a_uuid_and_keeps_the_rest(tmp_path):
-    import re
-
-    path = tmp_path / "paints.sqlite3"
-    _make_v10_with_paints(path)
-
-    db.init_db(path)
-
-    conn = db.connect(path)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == len(db.MIGRATIONS)
-    rows = conn.execute("SELECT id, uuid, name, code, barcode, hex FROM paint ORDER BY id").fetchall()
-    assert [(r["id"], r["name"], r["code"], r["barcode"], r["hex"]) for r in rows] == [
-        (1, "Nuln Oil", "24-14", "501", "#1d1d1d"), (2, "Leadbelcher", None, None, None),
-        (7, "Retributor", None, None, None),
-    ]
-    uuids = [r["uuid"] for r in rows]
-    assert all(re.match(_UUID_RE, u) for u in uuids), uuids
-    assert len(set(uuids)) == 3
-    # pots and tags still point to the right paints
-    assert {tuple(r) for r in conn.execute("SELECT paint_id, quantity FROM paint_location")} == {(1, 2), (7, 1)}
-    assert conn.execute("SELECT paint_id FROM paint_tag").fetchall()[0][0] == 1
-    assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
-    conn.close()
-
-    # a copy of the old database was left next to it, untouched
-    backup = tmp_path / "paints.before-v10.sqlite3"
-    assert backup.exists()
-    old = sqlite3.connect(backup)
-    assert old.execute("PRAGMA user_version").fetchone()[0] == 10
-    assert old.execute("SELECT count(*) FROM paint").fetchone()[0] == 3
-    old.close()
-
-    db.init_db(path)  # second start: uuids don't change
-    conn = db.connect(path)
-    assert [r[0] for r in conn.execute("SELECT uuid FROM paint ORDER BY id")] == uuids
     conn.close()
 
 
@@ -225,3 +177,42 @@ def test_uuid_is_given_on_insert_and_cannot_change(tmp_path):
             conn.execute("INSERT INTO paint (name, manufacturer_id, uuid) VALUES ('Again', ?, ?)",
                          (maker, uuids[1]))
     conn.close()
+
+
+def test_migration_16_tidies_saved_names(tmp_path):
+    path = tmp_path / "paints.sqlite3"
+    conn = _baseline(path)
+    with conn:
+        conn.execute("INSERT INTO manufacturer (id, name) VALUES (50, ' Two  Thin Coats ')")
+        conn.executemany("INSERT INTO paint (id, name, manufacturer_id, code, barcode) VALUES (?, ?, 50, ?, ?)", [
+            (1, "  Nuln   Oil ", " 24-14 ", " 111 "),
+            (2, "Black", None, None),
+            (3, " black", None, None),          # tidied, it would repeat paint 2: left alone
+            (4, "\u200bЗелёный ", "  ", None),   # an invisible character; a blank code becomes none
+        ])
+        conn.execute("INSERT INTO storage (id, nfc_tag, at_hand) VALUES (9, ' 04:A2 ', 0)")
+        conn.executemany("INSERT INTO storage_name (storage_id, lang, name) VALUES (9, ?, ?)",
+                         [("ru", "  Коробка  9"), ("en", " Box 9 ")])
+        conn.execute("INSERT INTO tag (id, color) VALUES (90, '#112233')")
+        conn.executemany("INSERT INTO tag_name (tag_id, lang, name) VALUES (90, ?, ?)",
+                         [("ru", " Глейз "), ("en", "Glaze")])
+    conn.close()
+
+    db.init_db(path)
+    conn = db.connect(path)
+    assert conn.execute("SELECT name FROM manufacturer WHERE id = 50").fetchone()[0] == "Two Thin Coats"
+    rows = {r["id"]: (r["name"], r["code"], r["barcode"]) for r in conn.execute("SELECT * FROM paint")}
+    assert rows == {1: ("Nuln Oil", "24-14", "111"), 2: ("Black", None, None),
+                    3: (" black", None, None), 4: ("Зелёный", None, None)}
+    assert [r[0] for r in conn.execute("SELECT name FROM storage_name WHERE storage_id = 9 ORDER BY lang")] == \
+        ["Box 9", "Коробка 9"]
+    assert conn.execute("SELECT name FROM tag_name WHERE tag_id = 90 AND lang = 'ru'").fetchone()[0] == "Глейз"
+    assert conn.execute("SELECT nfc_tag FROM storage WHERE id = 9").fetchone()[0] == "04:A2"
+    conn.close()
+
+
+def test_old_sqlite_is_explained(monkeypatch, tmp_path):
+    monkeypatch.setattr(db.sqlite3, "sqlite_version_info", (3, 31, 1))
+    monkeypatch.setattr(db.sqlite3, "sqlite_version", "3.31.1")
+    with pytest.raises(db.OldSQLite, match="SQLite 3.31.1, the app needs 3.35"):
+        db.init_db(tmp_path / "paints.sqlite3")

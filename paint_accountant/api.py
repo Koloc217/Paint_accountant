@@ -420,6 +420,22 @@ def delete_tag(tag_id: int, conn: sqlite3.Connection = Conn):
 MAX_UPLOAD = 20 * 1024 * 1024
 
 
+async def read_body(request: Request, limit: int, too_large: str) -> bytes:
+    """The request body, refused as soon as it is known to be over the limit — by its
+    Content-Length, or while it arrives — instead of after all of it is in memory."""
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > limit:
+        raise HTTPException(413, too_large)
+    chunks: list[bytes] = []
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > limit:
+            raise HTTPException(413, too_large)
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 @router.get("/recognize", tags=["photo"])
 def recognize_status() -> dict:
     """Whether photo recognition is installed (it is an optional part)."""
@@ -443,11 +459,9 @@ async def recognize(
     info = recognition.availability()
     if not info["available"]:
         raise HTTPException(503, f"photo recognition is not installed: {info['install']}")
-    data = await request.body()
+    data = await read_body(request, MAX_UPLOAD, "photo is too large (max 20 MB)")
     if not data:
         raise HTTPException(422, "send a photo in the request body")
-    if len(data) > MAX_UPLOAD:
-        raise HTTPException(413, "photo is too large (max 20 MB)")
 
     db_path = request.app.state.settings.db_path
 
@@ -522,11 +536,9 @@ async def backup_dump(request: Request) -> Response:
 async def backup_restore(request: Request) -> dict:
     """Replace the whole catalog with a dump sent as the request body. The current
     database is copied aside first (paints.before-restore-….sqlite3 in the data folder)."""
-    data = await request.body()
+    data = await read_body(request, backup.MAX_DUMP_BYTES, "the file is too large")
     if not data:
         raise HTTPException(422, "send the dump file in the request body")
-    if len(data) > backup.MAX_DUMP_BYTES:
-        raise HTTPException(413, "the file is too large")
     try:
         return await run_in_threadpool(backup.restore_dump, request.app.state.settings, data)
     except backup.BadDump as exc:
