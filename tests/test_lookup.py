@@ -7,6 +7,8 @@ import struct
 import threading
 
 import pytest
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from paint_accountant import config, lookup
@@ -87,6 +89,11 @@ TAG_WORDS = {"metallic", "metal", "shade", "wash", "primer", "contrast", "ink", 
     ("Warhammer Paint: Mephiston Red", ["Citadel"], None, "Mephiston Red"),
     ("Citadel 21-03 Games Workshop Base Mephiston Red Paints",
      ["Citadel", "games workshop"], "21-03", "Mephiston Red"),
+    # a shop's wholesale article is not a name, so the name comes from the piece after the dash
+    ("Games Workshop GAW9918995020406 21-55 Base - Runelord Brass Paint",
+     ["Games Workshop", "Citadel"], "21-55", "Runelord Brass"),
+    ("Runelord Brass Base Paint 12ml", ["Citadel"], None, "Runelord Brass"),
+    ("Citadel Base: Runelord Brass", ["Citadel"], None, "Runelord Brass"),
 ])
 def test_clean_title(title, names, code, expected):
     assert lookup.clean_title(title, names, code, TAG_WORDS) == expected
@@ -130,6 +137,16 @@ def test_shop_article_glued_to_the_code(client, monkeypatch):
     _answer(monkeypatch, data={"items": [{"title": "GAW21-03 Mephiston Red Base Paint", "brand": ""}]})
     s = client.get("/api/lookup/upcitemdb", params={"barcode": "5011921026203"}).json()["suggestion"]
     assert (s["name"], s["code"]) == ("Mephiston Red", "21-03")
+
+
+def test_wholesale_article_never_becomes_the_name(client, monkeypatch):
+    """A GW pot as a shop lists it: GAW… is their own article, 21-55 is Citadel's code."""
+    _answer(monkeypatch, data={"items": [
+        {"title": "Games Workshop GAW9918995020406 21-55 Base - Runelord Brass Paint",
+         "brand": "Games Workshop", "model": ""}]})
+    s = client.get("/api/lookup/upcitemdb", params={"barcode": "5011921150014"}).json()["suggestion"]
+    assert (s["name"], s["code"]) == ("Runelord Brass", "21-55")
+    assert s["manufacturer"]["name"] == "Citadel"
 
 
 def test_several_listings_the_one_with_a_name_wins(client, monkeypatch):
@@ -180,11 +197,33 @@ def test_limits_and_errors(client, monkeypatch):
     assert r.status_code == 502 and "oops" in r.json()["detail"]["message"]
 
     def down(barcode, how):
-        raise TimeoutError("timed out")
+        raise ConnectionRefusedError(111, "Connection refused")
 
     monkeypatch.setattr(lookup, "fetch", down)
     r = client.get("/api/lookup/upcitemdb", params={"barcode": "8436574502206"})
     assert r.status_code == 502 and r.json()["detail"]["code"] == "lookup_unreachable"
+    assert "api.upcitemdb.com" in r.json()["detail"]["message"]  # direct: the site is named
+
+
+def test_a_dead_proxy_is_named_without_its_password(client, monkeypatch, tmp_path):
+    """The usual failure: nothing is listening where the proxy is said to be."""
+    ini = client.app.state.settings.config_file
+    ini.write_text("[lookup]\nproxy = socks5h://me:secret@192.168.1.60:1080\n", encoding="utf-8")
+    client.app.state.settings = load_settings(data_dir=tmp_path / "data", config_file=ini)
+    assert client.get("/api/info").json()["lookup"]["route"] == "socks5h://192.168.1.60:1080"
+
+    def refused(barcode, how):
+        raise ConnectionRefusedError(111, "Connection refused")
+
+    monkeypatch.setattr(lookup, "fetch", refused)
+    message = client.get("/api/lookup/upcitemdb", params={"barcode": "8436574502206"}).json()["detail"]["message"]
+    assert "socks5h://192.168.1.60:1080 doesn't answer" in message and "secret" not in message
+
+
+def test_a_proxy_from_the_environment_says_so(monkeypatch):
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:8080")
+    how = lookup.route(load_settings(config_file=Path("/nonexistent/config.ini")))
+    assert how.from_env is True and how.label == "http://127.0.0.1:8080 (from HTTPS_PROXY)"
 
 
 def test_bad_barcode_never_leaves(client, monkeypatch):
@@ -197,7 +236,7 @@ def test_bad_barcode_never_leaves(client, monkeypatch):
 
 def test_setting_turns_it_off_and_is_saved(client, monkeypatch):
     calls = _answer(monkeypatch, data={"items": [QUICKSILVER]})
-    assert client.get("/api/info").json()["lookup"] == {"upcitemdb": True, "via": "direct", "interface": None}
+    assert client.get("/api/info").json()["lookup"] == {"upcitemdb": True, "via": "direct", "route": "no proxy"}
     r = client.put("/api/settings/lookup", json={"enabled": False})
     assert r.status_code == 200 and r.json()["upcitemdb"] is False
     assert client.get("/api/info").json()["lookup"]["upcitemdb"] is False
@@ -229,7 +268,7 @@ def test_config_and_route(monkeypatch, tmp_path):
     assert lookup.route(load_settings(config_file=ini)) == lookup.Route(interface="awg0")
 
     ini.write_text("", encoding="utf-8")
-    assert lookup.route(load_settings(config_file=ini)) == lookup.Route(proxy="http://10.0.0.1:3128")
+    assert lookup.route(load_settings(config_file=ini)) == lookup.Route(proxy="http://10.0.0.1:3128", from_env=True)
     monkeypatch.setenv("PAINT_LOOKUP_PROXY", "socks5://10.0.0.2:1080")
     monkeypatch.setenv("PAINT_LOOKUP", "off")
     s = load_settings(config_file=ini)

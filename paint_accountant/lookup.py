@@ -58,10 +58,21 @@ class Route:
 
     proxy: str | None = None
     interface: str | None = None
+    from_env: bool = False  # taken from HTTPS_PROXY / ALL_PROXY, not from config.ini
 
     @property
     def kind(self) -> str:
         return "proxy" if self.proxy else "interface" if self.interface else "direct"
+
+    @property
+    def label(self) -> str:
+        """How to name this route to the user — never with the proxy's name and password in it."""
+        if self.proxy:
+            url = urlsplit(self.proxy if "://" in self.proxy else "http://" + self.proxy)
+            port = f":{url.port}" if url.port else ""
+            where = f"{url.scheme or 'http'}://{url.hostname or '?'}{port}"
+            return f"{where} (from HTTPS_PROXY)" if self.from_env else where
+        return self.interface or "no proxy"
 
 
 def route(settings) -> Route:
@@ -73,7 +84,7 @@ def route(settings) -> Route:
     for name in ("HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"):
         value = os.environ.get(name, "").strip()
         if value:
-            return Route(proxy=value)
+            return Route(proxy=value, from_env=True)
     return Route()
 
 
@@ -248,10 +259,19 @@ SHOP_WORDS = {
     "warhammer", "40k", "wargaming", "stock", "all", "official", "genuine", "new",
 }
 
-# a shop's own article glued to the maker's code: "GAW21-03" is Citadel's 21-03
-RETAILER_SKU = re.compile(r"\bGAW(?=\d{2}\s?-\s?\d{2}\b)", re.I)
+# a shop's own article in front of the maker's: "GAW21-03" is Citadel's 21-03,
+# and "GAW9918995020406" is a wholesale number with nothing of ours in it
+RETAILER_SKU = re.compile(r"\bGAW(?=\d)", re.I)
 SEPARATORS = re.compile(r"\s+[-–—|/:]\s+|[|,;:(){}\[\]]")
 NUMBER = re.compile(r"\d+([.,]\d+)?")
+# an article number rather than a word: five or more digits, with a few letters or dashes
+# ("9918995020406", "GAW9918995020406", "70.950"). A paint's name never looks like this.
+ARTICLE = re.compile(r"[A-Za-z]{0,4}\d[\d.,\-]{4,}")
+
+
+def _is_word(w: str) -> bool:
+    """Something that can be part of a name — not a number and not an article."""
+    return bool(rec.norm(w)) and not NUMBER.fullmatch(w) and not ARTICLE.fullmatch(w)
 
 
 def _text(value: Any, limit: int = 300) -> str:
@@ -311,11 +331,11 @@ def clean_title(title: str, maker_names: list[str], code: str | None, tag_words:
     fallback = ""
     for piece in SEPARATORS.split(text):
         words = piece.replace("#", " ").split()
-        meaningful = [w for w in words if rec.norm(w) and rec.norm(w) not in filler and not NUMBER.fullmatch(w)]
+        meaningful = [w for w in words if _is_word(w) and rec.norm(w) not in filler]
         if not meaningful:
             continue
         # drop filler everywhere, kind-of-paint words only at the edges
-        kept = [w for w in words if rec.norm(w) not in filler and not NUMBER.fullmatch(w) and rec.norm(w)]
+        kept = [w for w in words if _is_word(w) and rec.norm(w) not in filler]
         core = list(kept)
         while core and rec.norm(core[0]) in tag_words:
             core.pop(0)
@@ -411,8 +431,11 @@ def lookup(conn: sqlite3.Connection, settings, barcode: str) -> dict[str, Any]:
         except LookupFailed:
             raise
         except (OSError, http.client.HTTPException) as exc:  # includes timeouts and TLS errors
-            via = {"proxy": " through the proxy", "interface": f" through {how.interface}", "direct": ""}[how.kind]
-            raise LookupFailed("lookup_unreachable", f"couldn't reach UPCitemdb{via}: {exc}")
+            # a refused connection to the proxy itself is the common one: say whose address it is
+            via = {"proxy": f"the proxy {how.label} doesn't answer",
+                   "interface": f"no way out through {how.interface}",
+                   "direct": "no answer from api.upcitemdb.com"}[how.kind]
+            raise LookupFailed("lookup_unreachable", f"{via} ({exc})")
         code = data.get("code") if isinstance(data, dict) else None
         if status == 429 or code in ("EXCEED_LIMIT", "TOO_FAST"):
             too_fast = code == "TOO_FAST"

@@ -90,10 +90,10 @@ def health(conn: sqlite3.Connection = Conn) -> dict:
 def info(request: Request) -> dict:
     """Version, the address other devices on the network can use (for NFC/QR links), interface language."""
     settings = request.app.state.settings
+    how = lookup.route(settings)
     return {"version": __version__, "lan_url": lan_url(settings.port),
             "language": request.app.state.language,
-            "lookup": {"upcitemdb": settings.lookup_enabled, "via": lookup.route(settings).kind,
-                       "interface": None if settings.lookup_proxy else settings.lookup_interface}}
+            "lookup": {"upcitemdb": settings.lookup_enabled, "via": how.kind, "route": how.label}}
 
 
 @router.put("/settings/language", tags=["system"])

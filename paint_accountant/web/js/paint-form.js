@@ -136,7 +136,8 @@ export async function viewPaintForm(mount, id, prefillStorage = null) {
     if (c === 'lookup_too_fast') return t('Слишком часто — UPCitemdb просит подождать минуту');
     if (c === 'lookup_disabled') return t('Поиск в UPCitemdb выключен в настройках');
     if (c === 'lookup_bad_barcode') return t('Штрихкод для поиска — 8, 12, 13 или 14 цифр');
-    if (c === 'lookup_unreachable' || c === 'lookup_config') return t('Нет связи с UPCitemdb: {0}', err.message);
+    if (c === 'lookup_unreachable') return t('Запрос не ушёл: {0}', err.message);
+    if (c === 'lookup_config') return t('Настройка прокси неверна: {0}', err.message);
     return explain(err);
   }
   /** Ask UPCitemdb about the barcode (the one given, or the one in the field) and fill empty fields. */
