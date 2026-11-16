@@ -23,7 +23,7 @@ def _paint(client, **kw):
 
 
 def test_health_and_starter_tags(client):
-    assert client.get("/api/health").json() == {"status": "ok", "schema_version": len(db.MIGRATIONS)}
+    assert client.get("/api/health").json() == {"status": "ok", "schema_version": db.SCHEMA_VERSION}
     tags = client.get("/api/tags").json()
     names = [t["name"] for t in tags]
     assert "Проливка" in names and "Контраст" in names

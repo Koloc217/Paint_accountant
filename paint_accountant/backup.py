@@ -30,7 +30,7 @@ from pathlib import Path
 from . import __version__
 from . import repository as repo
 from .config import Settings
-from .db import MIGRATIONS, connect, init_db
+from .db import BASELINE_VERSION, SCHEMA_VERSION, connect, init_db, too_old
 
 DB_NAME = "paints.sqlite3"
 MANIFEST = "manifest.json"
@@ -123,9 +123,11 @@ def _check_db(path: Path) -> dict:
         raise BadDump("not a Paint Accountant database") from exc
     if not {"paint", "storage", "tag"} <= tables:
         raise BadDump("not a Paint Accountant database")
-    if version > len(MIGRATIONS):
+    if version > SCHEMA_VERSION:
         raise BadDump(f"the dump is from a newer version of the app (schema {version}, "
-                      f"this app knows {len(MIGRATIONS)}) — update the app first")
+                      f"this app knows {SCHEMA_VERSION}) — update the app first")
+    if version < BASELINE_VERSION:
+        raise BadDump(f"the dump can't be restored: {too_old(version)}")
     return {"schema_version": version}
 
 
@@ -156,7 +158,7 @@ def restore_dump(settings: Settings, data: bytes) -> dict:
     with tempfile.TemporaryDirectory() as tmp:
         new_db = _unpack(data, Path(tmp))
         info = _check_db(new_db)
-        init_db(new_db)  # an older dump is brought up to this app's schema, in the temp copy
+        init_db(new_db)  # a dump of an earlier schema is brought up to this app's, in the temp copy
 
         live = connect(settings.db_path)
         try:

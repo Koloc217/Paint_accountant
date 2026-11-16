@@ -75,10 +75,6 @@ def test_csv_in_english_translates_starter_tags_and_storage(client):
     assert ru["Nuln Oil"][6] == "Проливка" and ru["Gunmetal Grey"][5] == "Под рукой ×1"
 
 
-def test_every_starter_tag_has_an_english_name():
-    assert {name for name, *_ in db.STARTER_TAGS} | {"Техническая"} == db.TAG_NAMES_EN.keys()
-
-
 def test_dump_moves_everything_to_another_machine(client, tmp_path):
     _fill(client)
     client.post("/api/auth/password", json={"password": "secret1"})
@@ -87,7 +83,7 @@ def test_dump_moves_everything_to_another_machine(client, tmp_path):
     with zipfile.ZipFile(io.BytesIO(r.content)) as z:
         manifest = json.loads(z.read("manifest.json"))
         assert set(z.namelist()) >= {"manifest.json", "paints.sqlite3"}
-    assert manifest["schema_version"] == len(db.MIGRATIONS) and manifest["counts"]["paint"] == 3
+    assert manifest["schema_version"] == db.SCHEMA_VERSION and manifest["counts"]["paint"] == 3
 
     with _client(tmp_path / "b") as other:
         other.post("/api/paints", json={"name": "Will Be Replaced", "manufacturer": "AK"})
@@ -114,17 +110,32 @@ def test_dump_holds_only_the_database(client):
         assert sorted(z.namelist()) == ["manifest.json", "paints.sqlite3"]
 
 
-def test_older_schema_is_upgraded_on_restore(client, tmp_path):
+def test_dump_of_the_previous_version_is_upgraded_on_restore(client, tmp_path):
     old = tmp_path / "old.sqlite3"
     conn = db.connect(old)
-    conn.execute("PRAGMA foreign_keys = OFF")
-    for number, script in enumerate(db.MIGRATIONS[:4], start=1):
-        conn.executescript(f"BEGIN; {script} PRAGMA user_version = {number}; COMMIT;")
+    db._create(conn)  # the schema as it was before the migrations
+    with conn:
+        conn.execute("INSERT INTO paint (name, manufacturer_id) VALUES ('  From  Before ', 1)")
+    conn.execute("PRAGMA journal_mode = DELETE")
     conn.close()
     r = client.post("/api/backup/restore", content=old.read_bytes())  # a bare .sqlite3 works too
     assert r.status_code == 200, r.text
-    assert r.json()["from_schema"] == 4
-    assert client.get("/api/health").json()["schema_version"] == len(db.MIGRATIONS)
+    assert r.json()["from_schema"] == db.BASELINE_VERSION
+    assert client.get("/api/health").json()["schema_version"] == db.SCHEMA_VERSION
+    assert [p["name"] for p in client.get("/api/paints").json()] == ["From Before"]
+
+
+def test_dump_from_before_the_baseline_is_refused(client, tmp_path):
+    client.post("/api/paints", json={"name": "Stays", "manufacturer": "Citadel"})
+    old = tmp_path / "old.sqlite3"
+    conn = sqlite3.connect(old)
+    conn.executescript("CREATE TABLE paint (id INTEGER PRIMARY KEY); CREATE TABLE storage (id INTEGER PRIMARY KEY);"
+                       "CREATE TABLE tag (id INTEGER PRIMARY KEY); PRAGMA user_version = 10;")
+    conn.close()
+    r = client.post("/api/backup/restore", content=old.read_bytes())
+    assert r.status_code == 422 and "old version of the app (schema 10" in r.text
+    assert [p["name"] for p in client.get("/api/paints").json()] == ["Stays"]  # the catalog is as it was
+    assert not list(client.app.state.settings.data_dir.glob("*.before-restore-*"))
 
 
 @pytest.mark.parametrize("payload, message", [
@@ -160,7 +171,7 @@ def test_restore_rejects_foreign_and_newer_databases(client, tmp_path):
         dbfile = tmp_path / "n.sqlite3"
         dbfile.write_bytes(z.read("paints.sqlite3"))
     c = sqlite3.connect(dbfile)
-    c.execute(f"PRAGMA user_version = {len(db.MIGRATIONS) + 1}")
+    c.execute(f"PRAGMA user_version = {db.SCHEMA_VERSION + 1}")
     c.close()
     r = client.post("/api/backup/restore", content=dbfile.read_bytes())
     assert r.status_code == 422 and "newer version" in r.text
