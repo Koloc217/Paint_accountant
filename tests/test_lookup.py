@@ -23,6 +23,18 @@ QUICKSILVER = {
 }
 
 
+# a real answer for a Citadel pot: the brand carries a word of its own, the code sits in "model",
+# and the shop's title is padded with "Warhammer", "Plastic Model Paint" and the volume
+MEPHISTON = {
+    "ean": "5011921026203",
+    "title": "Mephiston Red Citadel Base Plastic Model Paint (0.4 fl oz)",
+    "brand": "Citadel Miniatures",
+    "model": "21-03",
+    "color": "Red",
+    "category": "Toys & Games > Puzzles > Jigsaw Puzzles",
+}
+
+
 @pytest.fixture(autouse=True)
 def _clean(monkeypatch):
     lookup.clear_cache()
@@ -53,7 +65,7 @@ def _answer(monkeypatch, status=200, data=None, headers=None):
 
 # ---------------- cleaning the title ----------------
 
-TAG_WORDS = {"metallic", "metal", "shade", "wash", "primer", "contrast", "ink", "air"}
+TAG_WORDS = {"metallic", "metal", "shade", "wash", "primer", "contrast", "ink", "air", "base", "layer"}
 
 
 @pytest.mark.parametrize("title, names, code, expected", [
@@ -68,6 +80,13 @@ TAG_WORDS = {"metallic", "metal", "shade", "wash", "primer", "contrast", "ink", 
     ("TAMIYA 81301 Acrylic Mini X-1 Black - 10ml Bottle", ["Tamiya"], "X-1", "Black"),
     ("NULN OIL 颜料 18ML", ["Citadel"], None, "Nuln Oil"),
     ("", [], None, ""),
+    # the same pot listed by different shops — every title must come down to the same name
+    (MEPHISTON["title"], ["Citadel Miniatures", "Citadel"], "21-03", "Mephiston Red"),
+    ("Citadel Mephiston Red Warhammer Wargaming In Stock Model Paint 12ml 21-03",
+     ["Citadel"], "21-03", "Mephiston Red"),
+    ("Warhammer Paint: Mephiston Red", ["Citadel"], None, "Mephiston Red"),
+    ("Citadel 21-03 Games Workshop Base Mephiston Red Paints",
+     ["Citadel", "games workshop"], "21-03", "Mephiston Red"),
 ])
 def test_clean_title(title, names, code, expected):
     assert lookup.clean_title(title, names, code, TAG_WORDS) == expected
@@ -93,6 +112,32 @@ def test_found_fills_the_form(client, monkeypatch):
     # the second press doesn't spend a request
     assert client.get("/api/lookup/upcitemdb", params={"barcode": "8436574502206"}).json()["cached"] is True
     assert len(calls) == 1
+
+
+def test_citadel_pot_with_the_code_in_model(client, monkeypatch):
+    _answer(monkeypatch, data={"items": [MEPHISTON]})
+    d = client.get("/api/lookup/upcitemdb", params={"barcode": "5011921026203"}).json()
+    s = d["suggestion"]
+    assert s["name"] == "Mephiston Red"
+    assert s["manufacturer"]["name"] == "Citadel"  # "Citadel Miniatures" is our Citadel
+    assert s["code"] == "21-03"  # from the item's "model" field
+    tags = {t["id"]: t["name"] for t in client.get("/api/tags").json()}
+    assert [tags[i] for i in s["tag_ids"]] == ["Основа"]
+    assert d["item"]["color"] == "Red" and d["item"]["model"] == "21-03"
+
+
+def test_shop_article_glued_to_the_code(client, monkeypatch):
+    _answer(monkeypatch, data={"items": [{"title": "GAW21-03 Mephiston Red Base Paint", "brand": ""}]})
+    s = client.get("/api/lookup/upcitemdb", params={"barcode": "5011921026203"}).json()["suggestion"]
+    assert (s["name"], s["code"]) == ("Mephiston Red", "21-03")
+
+
+def test_several_listings_the_one_with_a_name_wins(client, monkeypatch):
+    nothing = {"title": "Citadel Base Paint Pot - Games Workshop - All Colors!", "brand": "Citadel Miniatures"}
+    _answer(monkeypatch, data={"items": [nothing, MEPHISTON]})
+    d = client.get("/api/lookup/upcitemdb", params={"barcode": "5011921026203"}).json()
+    assert d["suggestion"]["name"] == "Mephiston Red"
+    assert d["item"]["title"] == MEPHISTON["title"]  # the listing that was used is the one shown
 
 
 def test_code_and_manufacturer_from_the_title(client, monkeypatch):

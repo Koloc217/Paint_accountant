@@ -245,7 +245,11 @@ SHOP_WORDS = {
     "x", "1x", "scale", "models", "kit", "kits", "tool", "tools", "toy", "toys", "plastic",
     "resin", "by", "from", "single", "unit", "units", "size",
     "warpaints", "3rd", "gen", "generation",  # product lines printed before the name
+    "warhammer", "40k", "wargaming", "stock", "all", "official", "genuine", "new",
 }
+
+# a shop's own article glued to the maker's code: "GAW21-03" is Citadel's 21-03
+RETAILER_SKU = re.compile(r"\bGAW(?=\d{2}\s?-\s?\d{2}\b)", re.I)
 SEPARATORS = re.compile(r"\s+[-–—|/:]\s+|[|,;:(){}\[\]]")
 NUMBER = re.compile(r"\d+([.,]\d+)?")
 
@@ -323,15 +327,20 @@ def clean_title(title: str, maker_names: list[str], code: str | None, tag_words:
     return fallback
 
 
+def tag_words(conn: sqlite3.Connection) -> set[str]:
+    """Words that only tell the kind of paint ("shade", "base") — tags of ours, not names."""
+    return {rec.norm(r["keyword"]) for r in conn.execute("SELECT keyword FROM tag_keyword")}
+
+
 def suggest(conn: sqlite3.Connection, barcode: str, item: dict) -> dict[str, Any]:
     """Fields for the paint form out of one UPCitemdb item."""
     makers = repo.list_manufacturers(conn)
     keywords = [(r["keyword"], r["tag_id"]) for r in conn.execute("SELECT keyword, tag_id FROM tag_keyword")]
-    tag_words = {rec.norm(kw) for kw, _ in keywords}
+    kinds = tag_words(conn)
 
-    title = _text(item.get("title"))
+    title = RETAILER_SKU.sub(" ", _text(item.get("title")))
     brand = _text(item.get("brand"), 100)
-    model = _text(item.get("model"), 50)
+    model = RETAILER_SKU.sub(" ", _text(item.get("model"), 50))
     maker = _find_maker(item, barcode, makers, conn)
 
     # the code: a shop title can hold any numbers, so only a pattern of this very manufacturer counts
@@ -350,7 +359,7 @@ def suggest(conn: sqlite3.Connection, barcode: str, item: dict) -> dict[str, Any
     if maker:
         names.append(maker["name"])
         names += [alias for alias, canonical in rec.ALIASES.items() if rec.norm(canonical) == rec.norm(maker["name"])]
-    name = clean_title(title, names, code, tag_words)
+    name = clean_title(title, names, code, kinds)
 
     return {
         "name": name or None,
@@ -419,19 +428,31 @@ def lookup(conn: sqlite3.Connection, settings, barcode: str) -> dict[str, Any]:
         else:
             message = _text(data.get("message"), 200) if isinstance(data, dict) else ""
             raise LookupFailed("lookup_error", f"UPCitemdb answered {status}" + (f": {message}" if message else ""))
-        raw = {"item": items[0] if items else None, "remaining": _int(headers.get("x-ratelimit-remaining"))}
+        # one barcode can come back with several listings of the same paint, whose titles differ
+        # ("Warhammer Paint: Mephiston Red" vs "… Citadel Base … 21-03"): keep a few to choose from
+        raw = {"items": items[:5], "remaining": _int(headers.get("x-ratelimit-remaining"))}
         if len(_cache) >= CACHE_SIZE:
             _cache.pop(next(iter(_cache)))
         _cache[barcode] = (now, raw)
         cached = False
 
-    item = raw["item"]
     result: dict[str, Any] = {
-        "source": "upcitemdb", "barcode": barcode, "found": item is not None,
+        "source": "upcitemdb", "barcode": barcode, "found": bool(raw["items"]),
         "cached": cached, "remaining": raw["remaining"],
     }
-    if item is not None:
+    if raw["items"]:
+        # the suggestion is built from today's manufacturers and tags, so it is never cached.
+        # A real name beats a listing of the whole range ("Citadel Base Paint Pot — All Colors!",
+        # whose only word left is the kind of paint), and that beats no name at all.
+        kinds = tag_words(conn)
+
+        def worth(suggestion: dict) -> int:
+            words = {rec.norm(w) for w in (suggestion["name"] or "").split()}
+            return 2 if words - kinds else 1 if words else 0
+
+        tries = [(item, suggest(conn, barcode, item)) for item in raw["items"]]
+        item, suggestion = max(tries, key=lambda pair: worth(pair[1]))
         result["item"] = {key: _text(item.get(key)) or None
                           for key in ("title", "brand", "model", "color", "size", "category")}
-        result["suggestion"] = suggest(conn, barcode, item)  # from today's manufacturers and tags, not cached
+        result["suggestion"] = suggestion
     return result
