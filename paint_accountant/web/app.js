@@ -587,6 +587,16 @@ function saveSort(sort) {
   try { localStorage.setItem('pa.sort', sort); } catch { /* private mode */ }
 }
 
+/** Table view of the paint list: on wide (PC) screens only; the choice is remembered on this device. */
+const wideScreen = window.matchMedia('(min-width: 900px)');
+function viewMode() {
+  try { return localStorage.getItem('pa.view') === 'table' ? 'table' : 'list'; } catch { return 'list'; }
+}
+function setViewMode(mode) {
+  try { localStorage.setItem('pa.view', mode); } catch { /* private mode */ }
+}
+const tableOn = () => wideScreen.matches && viewMode() === 'table';
+
 const newFilters = () => ({ q: '', storage: '', maker: '', tags: new Set(), atHand: false, stock: '', sort: savedSort() });
 const filters = newFilters();          // the main paint list
 const storageFilters = new Map();      // one set per storage page, kept while you move around
@@ -608,6 +618,66 @@ function anyFilter() { return anyFilterIn(filters); }
  * Search, filters, summary line and the paint list. Used by the main list (all storages)
  * and by a storage page (storageId: only paints in it; +/- and counts work in that storage).
  */
+/**
+ * The paint list as a table (PC). Column headers sort: name, manufacturer, pots.
+ * sel: as for paintList — while on, a click picks the row instead of opening it.
+ */
+function paintTable(paints, { storageId = null, sel = null, f, onSort }) {
+  const picking = Boolean(sel && sel.on);
+  const head = (label, sorts) => {
+    if (!sorts) return h('th', null, label);
+    const at = sorts.indexOf(f.sort);
+    const mark = at === -1 ? '' : f.sort === 'qty_desc' ? ' ▼' : ' ▲';
+    return h('th', { class: 'sortable', 'aria-sort': at === -1 ? 'none' : f.sort === 'qty_desc' ? 'descending' : 'ascending' },
+      h('button', { type: 'button', title: t('Сортировка'), onclick: () => onSort(sorts[(at + 1) % sorts.length]) }, label + mark));
+  };
+
+  const rows = paints.map(p => {
+    const n = storageId
+      ? ((p.locations.find(l => l.storage && l.storage.id === storageId) || {}).quantity || 0)
+      : p.quantity;
+    // h() leaves out null cells; DOM append() would print them as the word "null"
+    const tr = h('tr', { class: 'paint-tr' + (n === 0 ? ' out' : '') },
+      picking ? h('td', { class: 'pick-cell' }, h('span', { class: 'pick-box', 'aria-hidden': 'true' })) : null,
+      h('td', { class: 'sw-cell' }, swatch(p.hex)),
+      h('td', null, h('a', { class: 't-name', href: `#/paint/${p.id}` }, p.name)),
+      h('td', null, p.manufacturer),
+      h('td', { class: 'muted' }, p.code || ''),
+      storageId ? null : h('td', null, locationsText(p)),
+      h('td', null, h('span', { class: 'paint-tags' },
+        p.tags.map(tg => h('span', { class: 'chip-mini', style: `--tc:${tg.color}` }, tg.name)))),
+      h('td', { class: 'num' }, n, storageId && p.quantity > n ? h('span', { class: 'muted small' }, ' ' + t('всего {0}', p.quantity)) : null));
+    if (picking) {
+      tr.classList.add('selectable');
+      const mark = () => tr.classList.toggle('picked', sel.ids.has(p.id));
+      tr.addEventListener('click', e => {
+        e.preventDefault();
+        if (sel.ids.has(p.id)) sel.ids.delete(p.id); else sel.ids.add(p.id);
+        mark();
+        sel.onPick();
+      });
+      mark();
+    } else {
+      tr.addEventListener('click', e => { if (!e.target.closest('a')) location.hash = `#/paint/${p.id}`; });
+    }
+    return tr;
+  });
+
+  return h('div', { class: 'table-wrap' }, h('table', { class: 'paint-table' },
+    h('thead', null, h('tr', null,
+      picking ? h('th', { class: 'pick-cell' }) : null,
+      h('th', { class: 'sw-cell' }),
+      head(t('Название'), ['name']),
+      head(t('Производитель'), ['maker']),
+      head(t('Код'), null),
+      storageId ? null : head(t('Где лежит'), null),
+      head(t('Теги'), null),
+      h('th', { class: 'num sortable', 'aria-sort': f.sort === 'qty_desc' ? 'descending' : f.sort === 'qty_asc' ? 'ascending' : 'none' },
+        h('button', { type: 'button', title: t('Сортировка'), onclick: () => onSort(f.sort === 'qty_desc' ? 'qty_asc' : 'qty_desc') },
+          t('Банок') + (f.sort === 'qty_desc' ? ' ▼' : f.sort === 'qty_asc' ? ' ▲' : ''))))),
+    h('tbody', null, rows)));
+}
+
 function paintBrowser({ f, storageId = null, tags, storages, makers, emptyText, emptyBig = null, onFabHref = null }) {
   // forget filters that point to deleted tags/storages/manufacturers
   const tagIds = new Set(tags.map(tg => tg.id));
@@ -623,7 +693,11 @@ function paintBrowser({ f, storageId = null, tags, storages, makers, emptyText, 
   const sel = { on: false, ids: new Set(), onPick: () => drawBar() };
 
   function drawList() {
-    if (current.length) listBox.replaceChildren(paintList(current, { storageId, sel }));
+    if (current.length) {
+      listBox.replaceChildren(tableOn()
+        ? paintTable(current, { storageId, sel, f, onSort: sort => { f.sort = sort; saveSort(sort); sortSel.value = sort; refresh(); } })
+        : paintList(current, { storageId, sel }));
+    }
     else if (anyFilterIn(f, storageId)) listBox.replaceChildren(h('div', { class: 'empty' }, t('Ничего не нашлось')));
     else listBox.replaceChildren(emptyBig ? emptyBig() : h('div', { class: 'empty' }, emptyText));
   }
@@ -753,6 +827,13 @@ function paintBrowser({ f, storageId = null, tags, storages, makers, emptyText, 
     const pots = current.reduce((n, p) => n + here(p), 0);
     summary.replaceChildren(h('span', null, `${countPaints(current.length)} · ${countPots(pots)}`));
     const buttons = h('span', { class: 'summary-actions' });
+    const viewButton = (mode, label) => h('button', {
+      type: 'button', 'aria-pressed': String((tableOn() ? 'table' : 'list') === mode),
+      onclick: () => { setViewMode(mode); applyView(); },
+    }, label);
+    // the choice only exists on wide screens (hidden by CSS on a phone)
+    buttons.append(h('span', { class: 'view-toggle', role: 'group', 'aria-label': t('Вид списка') },
+      viewButton('list', t('Список')), viewButton('table', t('Таблица'))));
     if (anyFilterIn(f, storageId)) {
       buttons.append(h('button', { type: 'button', onclick: () => { resetFiltersOf(f); render(); } }, t('Сбросить фильтры')));
     }
@@ -800,6 +881,18 @@ function paintBrowser({ f, storageId = null, tags, storages, makers, emptyText, 
     drawList();
     drawBar();
   }
+
+  function applyView() {
+    document.body.classList.toggle('wide-table', tableOn());
+    drawList();
+    updateSummary();
+  }
+  document.body.classList.toggle('wide-table', tableOn());
+  wideScreen.addEventListener('change', applyView);
+  onLeave(() => {
+    wideScreen.removeEventListener('change', applyView);
+    document.body.classList.remove('wide-table');
+  });
 
   // quick +/- changes totals in the summary line
   document.addEventListener('paints-changed', updateSummary);
