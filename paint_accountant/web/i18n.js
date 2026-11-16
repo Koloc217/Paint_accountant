@@ -1,18 +1,17 @@
 /* Interface language. Russian text is the key; EN holds the English version.
  * The language is set in config.ini ([ui] language, also from Settings) for every device;
  * the server puts it into <html data-lang>. "auto" means the browser's language. */
-'use strict';
 
-const LANGS = [['ru', 'Русский'], ['en', 'English']];
+export const LANGS = [['ru', 'Русский'], ['en', 'English']];
 
-const LANG_SETTING = ['auto', ...LANGS.map(([code]) => code)].includes(document.documentElement.dataset.lang)
+export const LANG_SETTING = ['auto', ...LANGS.map(([code]) => code)].includes(document.documentElement.dataset.lang)
   ? document.documentElement.dataset.lang : 'auto';
 
-const LANG = LANG_SETTING !== 'auto' ? LANG_SETTING
+export const LANG = LANG_SETTING !== 'auto' ? LANG_SETTING
   : (navigator.language || 'ru').toLowerCase().startsWith('ru') ? 'ru' : 'en';
 
 /** Save the language into config.ini (for every device) and reload. */
-async function setLang(code) {
+export async function setLang(code) {
   const res = await fetch('/api/settings/language', {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ language: code }),
   });
@@ -21,14 +20,14 @@ async function setLang(code) {
 }
 
 /** t('Удалить «{0}»?', name) — the text in the current language with {0}, {1}… filled in. */
-function t(text, ...args) {
+export function t(text, ...args) {
   const s = (LANG === 'en' && EN[text]) || text;
   return args.length ? s.replace(/\{(\d+)\}/g, (m, i) => (args[i] === undefined ? m : String(args[i]))) : s;
 }
 
 /** Names in the page's language anywhere in an API answer: tags and storages carry
  *  "names" ({ru, en}), and "name" becomes the one for this page. */
-function localizeBuiltins(data) {
+export function localizeBuiltins(data) {
   if (data === null || typeof data !== 'object') return data;
   if (Array.isArray(data)) { data.forEach(localizeBuiltins); return data; }
   if (data.names && typeof data.names === 'object' && data.names[LANG]) data.name = data.names[LANG];
@@ -60,7 +59,7 @@ const EN = {
   "⬇ Список красок (CSV)": "⬇ Paint list (CSV)",
   "По производителям, с цветом, если он задан. Открывается в Excel и Google Таблицах. Только для чтения — обратно не загружается.": "By manufacturer, with the color when set. Opens in Excel and Google Sheets. For reading only — it can't be loaded back.",
   "⬇ Полная копия (.zip)": "⬇ Full backup (.zip)",
-  "Вся база и фото — чтобы перенести каталог на другой компьютер или вернуть после сбоя. Пароль входа тоже внутри.": "The whole database and photos — to move the catalog to another computer or bring it back after a failure. The sign-in password is inside too.",
+  "Вся база — чтобы перенести каталог на другой компьютер или вернуть после сбоя. Пароль входа тоже внутри.": "The whole database — to move the catalog to another computer or bring it back after a failure. The sign-in password is inside too.",
   "Загрузите .zip, скачанный выше (здесь или на другом компьютере). Из консоли: ": "Load a .zip downloaded above (here or on another computer). From the console: ",
   "Ошибка {0}": "Error {0}",
   "Нет связи с сервером": "Can't reach the server",
@@ -276,8 +275,8 @@ const EN = {
   "Хранилище с таким названием уже есть": "A storage with this name already exists",
   "Поиск хранилища": "Search storages",
   "под рукой": "at hand",
-  " · дубликаты → {0}": " · duplicates → {0}",
   " · метка": " · tagged",
+  " · дубликаты → {0}": " · duplicates → {0}",
   "Хранилищ пока нет. Коробки, ящики, полки — всё, где лежат краски.": "No storages yet. Boxes, drawers, shelves — anywhere your paints are.",
   "🖨 QR-метки": "🖨 QR labels",
   "Здесь пока пусто": "Nothing here yet",
@@ -356,6 +355,7 @@ const EN = {
   "Слишком много попыток — подождите {0} с": "Too many attempts — wait {0} s",
   "Забыли пароль? На компьютере с приложением выполните ": "Forgot the password? On the computer running the app, run ",
   " — вход отключится, новый пароль можно задать в настройках.": " — sign-in turns off, and you can set a new password in Settings.",
+  "Текущий пароль": "Current password",
   "Новый пароль": "New password",
   "Не короче 4 символов": "At least 4 characters",
   "Ещё раз": "Repeat",
@@ -390,6 +390,65 @@ const EN = {
 
 // the static parts of index.html
 document.documentElement.lang = LANG;
+/* Messages the server sends with an error are in English (they also go to API clients
+ * and scripts). For the Russian interface they are put into Russian here; a message that
+ * is not in the list is shown as it came. */
+const SERVER_RU = [
+  [/^storage named '(.*)' already exists$/, 'Хранилище «$1» уже есть'],
+  [/^tag named '(.*)' already exists$/, 'Тег «$1» уже есть'],
+  [/^manufacturer '(.*)' already exists$/, 'Производитель «$1» уже есть'],
+  [/^manufacturer '(.*)' still has (\d+) paints$/, 'У производителя «$1» ещё есть краски: $2'],
+  [/^manufacturer is required$/, 'Укажите производителя'],
+  [/^manufacturer \d+ does not exist$/, 'Такого производителя уже нет'],
+  [/^storage \d+ does not exist$/, 'Такого хранилища уже нет'],
+  [/^tags do not exist: .*$/, 'Какого-то из тегов уже нет — обновите страницу'],
+  [/^paints not found: .*$/, 'Каких-то из красок уже нет — обновите страницу'],
+  [/^a storage can't be its own copies storage$/, 'Хранилище не может быть местом для своих же дубликатов'],
+  [/^the default storage can't be deleted; make another storage default first$/,
+    'Хранилище по умолчанию удалить нельзя — сначала сделайте таким другое'],
+  [/^name (must not|cannot) be empty$/, 'Название не может быть пустым'],
+  [/^paint '(.*)' of this manufacturer already exists \(id \d+\); change its quantity instead$/,
+    'Краска «$1» этого производителя уже есть — измените количество банок у неё'],
+  [/^barcode (\S+) already belongs to paint '(.*)' \(id \d+\)$/, 'Штрихкод $1 уже записан у краски «$2»'],
+  [/^not enough pots there$/, 'Там нет столько банок'],
+  [/^not enough pots in that storage$/, 'В этом хранилище нет столько банок'],
+  [/^there are fewer pots than that$/, 'Банок меньше, чем нужно убрать'],
+  [/^from and to are the same$/, 'Откуда и куда — одно и то же хранилище'],
+  [/^no paints given$/, 'Не выбрано ни одной краски'],
+  [/^no tags given$/, 'Не выбрано ни одного тега'],
+  [/^can't merge a paint with itself$/, 'Нельзя объединить краску с самой собой'],
+  [/^wrong password$/, 'Неверный пароль'],
+  [/^too many wrong passwords, wait (\d+) s$/, 'Слишком много неверных паролей, подождите $1 с'],
+  [/^sign in first$/, 'Сначала войдите'],
+  [/^number is too large$/, 'Слишком большое число'],
+  [/^photo recognition is not installed: (.*)$/, 'Распознавание фото не установлено: $1'],
+  [/^send a photo in the request body$/, 'Фото не дошло до сервера'],
+  [/^photo is too large \(max 20 MB\)$/, 'Фото слишком большое (не больше 20 МБ)'],
+  [/^not an image or unsupported format$/, 'Это не картинка, или её формат не поддерживается'],
+  [/^send the dump file in the request body$/, 'Файл копии не дошёл до сервера'],
+  [/^the file is too large$/, 'Файл слишком большой'],
+  [/^the archive is too big$/, 'Архив слишком большой'],
+  [/^the database in the file is damaged$/, 'База в этом файле повреждена'],
+  [/^not a Paint Accountant database$/, 'Это не база Paint Accountant'],
+  [/^expected a \.zip dump \(or a \.sqlite3 database\)$/, 'Нужен .zip с копией (или файл базы .sqlite3)'],
+  [/^no paints\.sqlite3 inside the archive — not a Paint Accountant dump$/,
+    'В архиве нет paints.sqlite3 — это не копия Paint Accountant'],
+  [/^the dump is from a newer version of the app \(schema (\d+), this app knows (\d+)\) — update the app first$/,
+    'Копия сделана более новой версией приложения (схема $1, а эта знает $2) — сначала обновите приложение'],
+  [/^the dump can't be restored: it was made by an old version of the app \(schema (\d+);.*commit (\w+).*$/,
+    'Копия сделана старой версией приложения (схема $1). Восстановите её в приложении версии $2, сделайте там новую копию и загрузите её сюда'],
+  [/^can't write (.*)$/, 'Не получилось записать $1'],
+];
+
+/** A server error message in the interface language. */
+export function serverText(message) {
+  if (LANG !== 'ru' || typeof message !== 'string') return message;
+  for (const [pattern, russian] of SERVER_RU) {
+    if (pattern.test(message)) return message.replace(pattern, russian);
+  }
+  return message;
+}
+
 document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); });
 document.querySelectorAll('[data-i18n-label]').forEach(el => {
   el.setAttribute('aria-label', t(el.dataset.i18nLabel));

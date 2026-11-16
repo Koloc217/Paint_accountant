@@ -9,8 +9,15 @@ from pathlib import Path
 WEB = Path(__file__).resolve().parent.parent / "paint_accountant" / "web"
 
 
+def _code() -> str:
+    """The scripts of the page, without the file of texts itself."""
+    files = [WEB / "app.js", *sorted((WEB / "js").glob("*.js"))]
+    assert len(files) > 5
+    return "\n".join(f.read_text(encoding="utf-8") for f in files)
+
+
 def _keys() -> set[str]:
-    src = (WEB / "app.js").read_text(encoding="utf-8")
+    src = _code()
     keys = {m.replace("\\'", "'") for m in re.findall(r"\bt\('((?:[^'\\]|\\.)*)'", src)}
     keys |= set(re.findall(r'data-i18n(?:-label)?="([^"]+)"', (WEB / "index.html").read_text(encoding="utf-8")))
     return keys
@@ -35,8 +42,8 @@ def test_placeholders_match():
 
 
 def test_no_untranslated_russian_left_in_code():
-    # Russian text in app.js must go through t(...) — except inside comments and plural forms
-    src = (WEB / "app.js").read_text(encoding="utf-8")
+    # Russian text in the scripts must go through t(...) — except inside comments and plural forms
+    src = _code()
     src = re.sub(r"/\*.*?\*/|//[^\n]*", "", src, flags=re.S)
     src = re.sub(r"\bt\('(?:[^'\\]|\\.)*'", "", src)
     src = src.replace("plural(n, 'краска', 'краски', 'красок')", "").replace("plural(n, 'банка', 'банки', 'банок')", "")

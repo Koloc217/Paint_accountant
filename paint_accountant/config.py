@@ -7,8 +7,7 @@ The app is portable: everything lives inside the folder it was unpacked to.
     ├── config.ini          your settings (created from config.example.ini on first start)
     ├── paint_accountant/   the code
     └── data/               created on first start
-        ├── paints.sqlite3  the database
-        └── photos/         uploaded pictures
+        └── paints.sqlite3  the database
 
 Priority, highest first: command-line arguments, environment variables,
 config.ini, built-in defaults. Relative paths are resolved against the app
@@ -46,13 +45,8 @@ class Settings:
     def db_path(self) -> Path:
         return self.data_dir / "paints.sqlite3"
 
-    @property
-    def photos_dir(self) -> Path:
-        return self.data_dir / "photos"
-
     def ensure_dirs(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
-        self.photos_dir.mkdir(parents=True, exist_ok=True)
 
 
 def _read_config_file(path: Path) -> dict[str, str]:
@@ -63,6 +57,25 @@ def _read_config_file(path: Path) -> dict[str, str]:
     parser.read(path, encoding="utf-8")
     return {k: v.strip() for section in ("server", "ui") if parser.has_section(section)
             for k, v in parser[section].items() if v.strip()}
+
+
+class BadSetting(ValueError):
+    """A setting that can't be used; the message says which one and where it came from."""
+
+
+def _port(arg: int | None, env: str | None, file: str | None, path: Path) -> int:
+    for value, source in ((arg, "the --port argument"), (env, "the PAINT_PORT environment variable"),
+                          (file, f"port in {path}")):
+        if value is None or str(value).strip() == "":
+            continue
+        try:
+            port = int(str(value).strip())
+        except ValueError:
+            port = 0
+        if not 1 <= port <= 65535:
+            raise BadSetting(f"{source} is {str(value).strip()!r} — the port must be a number from 1 to 65535")
+        return port
+    return DEFAULT_PORT
 
 
 def _language(value: str | None) -> str:
@@ -86,7 +99,7 @@ def load_settings(
     file = _read_config_file(path)
     return Settings(
         host=host or env.get("PAINT_HOST") or file.get("host") or DEFAULT_HOST,
-        port=int(port or env.get("PAINT_PORT") or file.get("port") or DEFAULT_PORT),
+        port=_port(port, env.get("PAINT_PORT"), file.get("port"), path),
         data_dir=_resolve(data_dir or env.get("PAINT_DATA_DIR") or file.get("data_dir") or DEFAULT_DATA_DIR),
         language=_language(env.get("PAINT_LANGUAGE") or file.get("language")),
         config_file=path,

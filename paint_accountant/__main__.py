@@ -8,10 +8,11 @@ from pathlib import Path
 import uvicorn
 
 from . import auth, backup, recognition
-from .db import connect
+from .db import OldDatabase, OldSQLite, connect
 from .app import create_app
 from .netinfo import lan_ip
 from .config import (
+    BadSetting,
     CONFIG_FILE,
     DEFAULT_DATA_DIR,
     DEFAULT_HOST,
@@ -56,10 +57,13 @@ def main(argv: list[str] | None = None) -> None:
     if args.config is None and ensure_config_file():
         print(f"Created {CONFIG_FILE} with default settings — edit it to change port or data folder.")
 
-    settings = load_settings(
-        host=args.host, port=args.port, data_dir=args.data_dir, config_file=args.config
-    )
-    app = create_app(settings)
+    try:
+        settings = load_settings(
+            host=args.host, port=args.port, data_dir=args.data_dir, config_file=args.config
+        )
+        app = create_app(settings)
+    except (BadSetting, OldDatabase, OldSQLite) as exc:
+        raise SystemExit(f"Can't start: {exc}")
     if args.reset_auth:
         conn = connect(settings.db_path)
         try:

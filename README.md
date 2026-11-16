@@ -4,7 +4,7 @@ A self-hosted catalog for miniature paints: what you own, how many pots, and whi
 
 Runs on any machine in your home network — Linux (x86_64 or ARM64, including Raspberry Pi) or Windows — with a web UI for your phone and a Telegram bot for adding paints by photo from anywhere.
 
-> **Status:** early development. Catalog, web UI and adding paints by photo work. The Telegram bot comes next. See [plans.md](plans.md) (in Russian) for the spec and roadmap.
+> **Status:** in use, still growing. Catalog, web UI, QR labels for storages, adding paints by photo, export and backup work. Not done yet: the Telegram bot, import of paint datasets, HTTPS. See [plans.md](plans.md) (in Russian) for the spec and roadmap.
 
 ## Quick start
 
@@ -33,8 +33,7 @@ Paint_accountant/
 ├── config.ini           your settings (created from config.example.ini on first start)
 ├── paint_accountant/    the code
 └── data/                created on first start
-    ├── paints.sqlite3   the database
-    └── photos/          uploaded pictures
+    └── paints.sqlite3   the database
 ```
 
 ### Exporting the list (for a chatbot or for reading)
@@ -51,16 +50,14 @@ API: `GET /api/export/paints.md?level=short|full&lang=ru|en&download=true`, with
 **⚙ Settings → Backup** has three buttons:
 
 - **⬇ Paint list (CSV)** — every paint sorted by manufacturer and name, with the color (hex) when set, pots, where they are, tags and barcode. UTF-8 with BOM; `;` as separator in Russian, `,` in English, so Excel opens it correctly in either locale. For reading only — it can't be imported back.
-- **⬇ Full backup (.zip)** — the whole database (paints, storages, tags, manufacturers, settings including the sign-in password) and the `photos/` folder, consistent even while the app is running.
+- **⬇ Full backup (.zip)** — the whole database (paints, storages, tags, manufacturers, settings including the sign-in password), consistent even while the app is running.
 - **Restore from a backup…** — replaces the catalog with a `.zip` made here or on another machine. The current database is kept as `data/paints.before-restore-<date>.sqlite3`; a dump from an older app version is upgraded on the way in, one from a newer version is refused.
 
 The same from the console: `python run.py --dump [file.zip]` and `python run.py --restore file.zip`. Copying the `data/` folder while the app is stopped works too.
 
-Autostart (systemd on Linux, Task Scheduler on Windows) and moving to another computer, step by step: [docs/autostart.md](docs/autostart.md).
+Autostart (systemd on Linux, Task Scheduler on Windows) and moving to another computer, step by step: [docs/autostart.md](docs/autostart.md). To move the whole app, copy the folder (and recreate `.venv` on the new machine).
 
-
-To change a storage's number in its link (`/#/storage/2` → `/#/storage/1`, e.g. to match an NFC tag you already wrote), stop the app and run `python tools/storage_id.py` to list storages, then `python tools/storage_id.py 2 1`. If the number is taken, the two storages swap; pots and settings follow. A copy of the database is saved first.
- To move the whole app, copy the folder (and recreate `.venv` on the new machine).
+To change a storage's number in its link (`/#/storage/2` → `/#/storage/1`, e.g. to match a label you already printed), stop the app and run `python tools/storage_id.py` to list storages, then `python tools/storage_id.py 2 1`. If the number is taken, the two storages swap; pots and settings follow. A copy of the database is saved first.
 
 ### Settings
 
@@ -69,7 +66,7 @@ On first start `config.ini` is created from `config.example.ini`; edit it to cha
 | `config.ini` key | Argument | Environment variable | Default |
 |---|---|---|---|
 | `host` | `--host` | `PAINT_HOST` | `0.0.0.0` (reachable from other devices on your network) |
-| `port` | `--port` | `PAINT_PORT` | `8642` |
+| `port` | `--port` | `PAINT_PORT` | `8642`; a value that isn't a port number stops the start with a message saying where it came from |
 | `language` (section `[ui]`) | — | `PAINT_LANGUAGE` | `auto` — the browser's language; `ru` or `en` for every device. ⚙ Settings writes it here |
 | `data_dir` | `--data-dir` | `PAINT_DATA_DIR` | `data` inside the app folder; relative paths are counted from the app folder, absolute ones (`/mnt/usb/paints`, `D:\Paints`) work too |
 
@@ -94,7 +91,7 @@ On a computer there is just an upload button.
 
 ### Sign-in (optional)
 
-Off by default: anyone on your home network can open the app. To ask for a password, open **⚙ Settings → Password sign-in**, set a password for the user `admin` and turn it on. The device you did it from stays signed in; other phones and computers sign in once and stay signed in for a year. Changing the password signs everyone else out. Without signing in, the API and `/docs` answer 401; QR and NFC links lead to the login screen and back to the storage.
+Off by default: anyone on your home network can open the app. To ask for a password, open **⚙ Settings → Password sign-in**, set a password for the user `admin` and turn it on. The device you did it from stays signed in; other phones and computers sign in once and stay signed in for a year. Changing the password asks for the current one and signs everyone else out. Without signing in, the API and `/docs` answer 401; links from QR labels lead to the login screen and back to the storage.
 
 The password is stored as a salted hash; after 5 wrong tries in a row an address waits a minute. Over plain `http` it travels unencrypted, so don't reuse an important password.
 
@@ -109,26 +106,27 @@ pytest
 
 ## Web UI
 
-- **Paints** — list with color swatches, search, filters by storage, manufacturer, tags, "at hand" and stock; quick +/− for the number of pots; add, edit, delete; manufacturer picked from a list, a new one can be added right in the form
+- **Paints** — list with color swatches, search (every word you type is looked for in the name, manufacturer, code, barcode and tags: `vallejo black`, `70950`), filters by storage, manufacturer, tags, "at hand" and stock; quick +/− for the number of pots; add, edit, delete; manufacturer picked from a list, a new one can be added right in the form
 - **List / Table** — on a wide (PC) screen the paint list can be switched to a table: name, manufacturer, code, where the pots lie, tags and the number of pots; click the Name, Manufacturer or Pots header to sort. The choice is remembered on this device; on a phone the list is always used. In the table the number of pots is read-only — change it on the paint's page
 - **Storages** — boxes and drawers with paint and pot counts and a search by name; a storage page has its own search and filters (manufacturer, tags), +/− work in that storage; each storage has a short link `http://<address>:8642/storage/<id>` and its QR code; **🖨 QR labels** makes a printable sheet of labels (pick storages, 3 / 4 / 5.5 cm wide, cut lines) or saves it as a PNG at 300 dpi, so it prints at the chosen size; ✎ next to a storage's name renames it — the phone's camera opens the storage from the label. The address is the computer's LAN IP, so reserve it in your router (DHCP reservation) before printing
 - **Where pots lie** — a paint can be in several storages at once ("At hand 1, Box 2"), and any storage can hold several pots of a paint. When adding you pick a storage (the **default** one is preselected; on a new database it's “At hand”). Adding a second pot of a paint to an **"at hand"** storage asks first: put it there anyway, or into another storage (each storage can name one to suggest). Adding a paint that already lies elsewhere warns about it; when "at hand" runs out, the app offers to take a pot from where it's left. The paint list shows the total over all storages
 - **Catalogs** — two tabs, manufacturers and tags. Tap a row to see its paints; ✎ renames (Enter saves, Esc cancels); 🗑 deletes (a manufacturer only when it has no paints). Tags show their color (tap to change), paint count and label words. Counters count different paints: the same paint entered twice (same manufacturer and name, e.g. once with a code and once without) counts once; the same name with different codes counts as different paints. Starter manufacturers: AK, Citadel, Green Stuff World, Kaleido, Kimera, Scale75, Tamiya, Vallejo
 - **Statistics** (📊) — totals; which storages are the busiest (bars, share of all pots, empty ones); paints with several pots and those lying in several storages; **possible duplicate records** (same manufacturer and name, different code or barcode — open one and press **Merge**); breakdown by manufacturer and tag; how many paints have no tag, color or barcode. The same numbers are at `GET /api/stats`
 
-No build step and no external libraries — plain HTML, CSS and JavaScript in `paint_accountant/web/`, so it works on a home network without internet.
+No build step and no external libraries — plain HTML, CSS and JavaScript in `paint_accountant/web/`, so it works on a home network without internet. The scripts are ES modules: `app.js` starts the app, `i18n.js` holds the texts, and each screen has its own file in `web/js/` (the list of them is at the top of `app.js`).
 
 ## API
 
 | Method | Path | What it does |
 |---|---|---|
-| GET | `/api/paints` | list paints; filters: `q`, `barcode`, `uuid` (repeatable), `manufacturer_id` or `manufacturer` (name), `storage_id`, `no_storage`, `tag_id` (repeatable), `at_hand`, `in_stock` |
+| GET | `/api/paints` | list paints; filters: `q` (words; each must be in the name, manufacturer, code, barcode or a tag), `barcode`, `uuid` (repeatable), `manufacturer_id` or `manufacturer` (name), `storage_id`, `no_storage`, `tag_id` (repeatable), `at_hand`, `in_stock` |
 | POST | `/api/paints` | add a paint; give `manufacturer_id`, or `manufacturer` by name (a new name is added to the list) |
 | GET / PATCH / DELETE | `/api/paints/{id}` | read, change (name, manufacturer, code, barcode, color, tags), delete a paint |
 | GET | `/api/paints/by-uuid/{uuid}` | read a paint by its permanent `uuid` |
 | POST | `/api/paints/{id}/add` | add pots: `{"count": 1}` to the default storage, `{"storage_id": N}` there; a second pot in an "at hand" storage needs `"allow_duplicate": true`, else 409 `duplicate_at_hand` with a suggested storage |
 | POST | `/api/paints/{id}/remove` | a pot is used up: from "at hand" first, or from `storage_id` |
 | POST | `/api/paints/{id}/move` | `{"from_storage_id", "to_storage_id", "count"}` |
+| POST | `/api/paints/bulk` | several paints at once: `{"paint_ids": […], "action": "move" \| "add_tags" \| "remove_tags", …}`, all or nothing |
 | POST | `/api/paints/{id}/merge` | fold a duplicate into this paint: `{"from_id": N, "barcode": "keep"\|"from"}` — its pots and tags move here, the duplicate is deleted (with its uuid) |
 | GET / POST | `/api/manufacturers` | list (with paint counts, `q` to filter) / add manufacturers |
 | PATCH / DELETE | `/api/manufacturers/{id}` | rename; delete only works when no paints use it |
@@ -142,35 +140,41 @@ No build step and no external libraries — plain HTML, CSS and JavaScript in `p
 | GET | `/api/qr.svg?data=…` | QR code as SVG (for storage labels) |
 | GET | `/api/auth` | whether sign-in is on and this device is signed in |
 | POST | `/api/auth/login` · `/api/auth/logout` | `{"password": "…"}`; sets / clears the session cookie |
-| POST | `/api/auth/password` | turn sign-in on or change the password (`{"password": "…"}`, at least 4 characters) |
+| POST | `/api/auth/password` | turn sign-in on (`{"password": "…"}`, at least 4 characters) or change the password (also `"current": "…"`) |
 | POST | `/api/auth/disable` | turn sign-in off |
+| GET | `/api/stats` | the numbers of the Statistics page |
+| GET | `/api/export/paints.md` | the list as Markdown (see Exporting the list) |
+| GET | `/api/backup/paints.csv` · `/api/backup/dump` | the CSV list / the full backup |
+| POST | `/api/backup/restore` | replace the catalog with a backup sent as the body |
+| GET | `/api/info` | app version, this machine's address in the network, interface language |
 | GET | `/api/health` | status and schema version |
 
 Every paint has two ids. `id` is a short number for this app's pages and API calls. `uuid` is given once when the paint is added and never changes, even when the database is rebuilt or merged: other apps (a project tracker, a script) should keep the `uuid` and look paints up by it.
 
-When a new version changes the database schema, the old file is copied first, next to it: `paints.before-v10.sqlite3` is the database as it was at schema 10. Delete these copies once the new version works for you.
+When a new version changes the database schema, the old file is copied first, next to it: `paints.before-v15.sqlite3` is the database as it was at schema 15. Delete these copies once the new version works for you. A database or a backup from before schema 15 can't be opened directly: start the app once as it was at commit `0ee8e28` (`git checkout 0ee8e28`) to bring it to schema 15, then update again.
 
 Full details at `/docs` on a running server.
 
 ## Idea
 
 - **Catalog your paints** — name, manufacturer, product code, hex color, number of pots, tags.
-- **Storage boxes with NFC tags** — tap your phone on a box to open the list of paints inside it. Tags are optional: a box can just be a named shelf.
+- **Storage boxes with QR labels** — print a label, stick it on a box, point the phone's camera at it to open the list of paints inside. The same link can be written into an NFC tag. Labels are optional: a box can just be a named shelf.
 - **"At hand" storage** — mark a drawer or organizer on your desk as within reach, and filter by what you can grab right now.
 - **Add paints by photo, not by typing** — barcode scan first, then local OCR of the label with fuzzy matching against paints you already have. Everything runs locally, no cloud AI APIs.
 - **Brand-agnostic** — no built-in brand list is required. The catalog grows from what you add yourself; external paint datasets can be imported as optional hints.
 - **Tags** — primer, base, layer, contrast, shade/wash, effects, metallic, ink, varnish, airbrush, technical (thinners, mediums, retarders, cleaners, putty); editable and extendable.
 
-## Planned stack
+## Stack
 
 | Part | Choice |
 |---|---|
-| Server | Python, FastAPI, SQLite |
+| Server | Python, FastAPI, SQLite (3.35 or newer) |
 | Barcode | zxing-cpp |
 | OCR | RapidOCR (ONNX, runs locally) |
 | Fuzzy search | rapidfuzz |
-| Web UI | plain HTTP on the local network, no certificates needed |
-| Bot | Telegram, optionally through a SOCKS5/MTProto proxy |
+| QR labels | segno |
+| Web UI | plain HTML, CSS and JavaScript; plain HTTP on the local network, no certificates needed |
+| Bot (planned) | Telegram, optionally through a SOCKS5/MTProto proxy |
 | Platforms | Linux (x86_64, ARM64) and Windows |
 
 Development and testing happen on a Raspberry Pi 5 (8 GB), but the Pi is not a requirement.
@@ -178,19 +182,19 @@ Development and testing happen on a Raspberry Pi 5 (8 GB), but the Pi is not a r
 ## Portability goals
 
 - Only dependencies with prebuilt wheels for Windows, Linux x86_64 and Linux ARM64
-- No hardcoded paths: data, database and photos go to a configurable folder, defaulting to the OS's standard per-user data directory
+- No hardcoded paths: the database goes to a configurable folder, by default `data/` inside the app folder
 - One command to run on any OS; autostart recipes (systemd, Windows Task Scheduler) are optional extras — see [docs/autostart.md](docs/autostart.md)
 - Photo recognition is an optional module — the catalog works without it
 
 ## Roadmap
 
-1. Skeleton and manual entry — data model, list/card views, storages, tags, search and filters
-2. Storages and NFC/QR tags — a page per storage, links to write into tags
-3. Photo recognition in the web UI — barcode → OCR → confirm
+1. ✔ Skeleton and manual entry — data model, list/card views, storages, tags, search and filters
+2. ✔ Storages and QR labels — a page per storage, printable labels with its link
+3. ✔ Photo recognition in the web UI — barcode → OCR → confirm
 4. Telegram bot — send photos or albums, confirm with inline buttons, pick a storage
 5. Import of external paint datasets (name, manufacturer, code, hex)
 
-Later ideas (return-to-box, cross-brand substitutes by color distance, shopping list, and more) are listed at the end of [plans.md](plans.md).
+Later ideas (return-to-box, cross-brand substitutes by color distance, and more) are listed at the end of [plans.md](plans.md).
 
 ## Acknowledgements
 
