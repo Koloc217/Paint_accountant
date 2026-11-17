@@ -380,6 +380,34 @@ def test_the_raw_answer_is_kept_for_looking_at(client, monkeypatch):
     assert client.get("/api/lookup/upcitemdb/raw", params={"barcode": "4006381333931"}).status_code == 404
 
 
+def test_xpress_color_is_a_contrast_paint(client, monkeypatch):
+    """Vallejo's Xpress Color is the same kind of paint as Citadel's Contrast."""
+    _answer(monkeypatch, data={"items": [
+        {"title": "VJP72406 18 ml Game Color Xpress Color Plasma Red Paint", "brand": "Vallejo"}]})
+    s = client.get("/api/lookup/upcitemdb", params={"barcode": "8429551724067"}).json()["suggestion"]
+    tags = {t["id"]: t["name"] for t in client.get("/api/tags").json()}
+    assert (s["name"], s["code"]) == ("Plasma Red", "72.406")
+    assert [tags[i] for i in s["tag_ids"]] == ["Контраст"]
+
+
+def test_a_brand_not_in_the_catalog_is_still_cleaned_off_the_name(client, monkeypatch):
+    """"The Army Painter" is written "Army Painter" as often as not, and isn't a maker here yet."""
+    _answer(monkeypatch, data={"items": [
+        {"title": "Army Painter Speedpaint 2.0 Zealot Yellow", "brand": "The Army Painter"}]})
+    s = client.get("/api/lookup/upcitemdb", params={"barcode": "5713799110403"}).json()["suggestion"]
+    tags = {t["id"]: t["name"] for t in client.get("/api/tags").json()}
+    assert s["name"] == "Zealot Yellow" and [tags[i] for i in s["tag_ids"]] == ["Контраст"]
+    # offered under the name we know them by, so the next pot of theirs finds this one
+    assert s["manufacturer"] is None and s["new_manufacturer"] == "Army Painter"
+
+
+def test_a_code_is_kept_when_the_brand_and_the_pattern_agree(client, monkeypatch):
+    _answer(monkeypatch, data={"items": [
+        {"title": "The Army Painter Warpaints Fanatic WP3001 Matt Black", "brand": "The Army Painter"}]})
+    s = client.get("/api/lookup/upcitemdb", params={"barcode": "5713799110403"}).json()["suggestion"]
+    assert s["code"] == "WP3001" and s["new_manufacturer"] == "Army Painter"
+
+
 def test_several_listings_the_one_with_a_name_wins(client, monkeypatch):
     nothing = {"title": "Citadel Base Paint Pot - Games Workshop - All Colors!", "brand": "Citadel Miniatures"}
     _answer(monkeypatch, data={"items": [nothing, MEPHISTON]})

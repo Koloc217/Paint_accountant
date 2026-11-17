@@ -135,7 +135,8 @@ STARTER_TAGS: list[tuple[str, str, str, list[str]]] = [
     ("Грунт", "Primer", "#9e9e9e", ["primer"]),
     ("Основа", "Base", "#5c6bc0", ["base"]),
     ("Слой", "Layer", "#42a5f5", ["layer"]),
-    ("Контраст", "Contrast", "#ab47bc", ["contrast", "speedpaint"]),
+    # Army Painter's Speedpaint and Vallejo's Xpress Color are the same kind of paint
+    ("Контраст", "Contrast", "#ab47bc", ["contrast", "speedpaint", "xpress"]),
     # "accent": Tamiya "Panel Line Accent Color" is a wash
     ("Проливка", "Wash", "#8d6e63", ["shade", "wash", "accent"]),
     # also weathering pigments and texture pastes
@@ -229,6 +230,12 @@ MIGRATIONS: list[str | Callable[[sqlite3.Connection], None]] = [
     # 17 — Mr. Hobby among the manufacturers a new database starts with, and a tag for the
     #      paints thinned with alcohol or a lacquer thinner.
     _add_mr_hobby_and_the_alcohol_tag,
+    # 18 — Vallejo's Xpress Color is a contrast paint, so the word now suggests that tag.
+    #      It follows whichever tag "contrast" belongs to, which is the user's to move.
+    """
+    INSERT OR IGNORE INTO tag_keyword (keyword, tag_id)
+        SELECT 'xpress', tag_id FROM tag_keyword WHERE keyword = 'contrast';
+    """,
 ]
 
 SCHEMA_VERSION = BASELINE_VERSION + len(MIGRATIONS)

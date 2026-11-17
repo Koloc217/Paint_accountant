@@ -38,9 +38,9 @@ def test_fresh_database_starts_with_the_starter_data(tmp_path):
     assert tuple(tags[0]) == (1, "Грунт", "Primer", "#9e9e9e")
     assert [t[1] for t in tags[-2:]] == ["Спиртовая", "Техническая"]
     words = {(r[0], r[1]) for r in conn.execute("SELECT keyword, tag_id FROM tag_keyword")}
-    assert {("primer", 1), ("accent", 5), ("pigment", 6), ("quickshade", 8), ("alcohol", 11),
-            ("revitalizer", 12)} <= words
-    assert len(words) == sum(len(kws) for *_, kws in db.STARTER_TAGS) == 39
+    assert {("primer", 1), ("xpress", 4), ("accent", 5), ("pigment", 6), ("quickshade", 8),
+            ("alcohol", 11), ("revitalizer", 12)} <= words
+    assert len(words) == sum(len(kws) for *_, kws in db.STARTER_TAGS) == 40
     assert [tuple(r) for r in conn.execute("SELECT lang, name FROM storage_name ORDER BY lang")] == \
         [("en", "At hand"), ("ru", "Под рукой")]
     assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
@@ -254,6 +254,22 @@ def test_mr_hobby_and_the_alcohol_tag_reach_an_older_database(tmp_path):
         assert conn.execute("SELECT count(*) FROM paint").fetchone()[0] == 1
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
         conn.close()
+
+
+def test_xpress_joins_whichever_tag_contrast_belongs_to(tmp_path):
+    path = tmp_path / "paints.sqlite3"
+    conn = _baseline(path)
+    with conn:  # as it was before, with the keyword on a tag the user has renamed
+        conn.execute("DELETE FROM tag_keyword WHERE keyword = 'xpress'")
+        conn.execute("UPDATE tag_name SET name = 'Контрастные' WHERE lang = 'ru' AND name = 'Контраст'")
+    mine = conn.execute("SELECT tag_id FROM tag_keyword WHERE keyword = 'contrast'").fetchone()[0]
+    conn.close()
+
+    db.init_db(path)
+    conn = db.connect(path)
+    assert [r[0] for r in conn.execute("SELECT tag_id FROM tag_keyword WHERE keyword = 'xpress'")] == [mine]
+    assert conn.execute("SELECT count(*) FROM tag").fetchone()[0] == len(db.STARTER_TAGS)
+    conn.close()
 
 
 def test_a_tag_of_your_own_by_that_name_is_left_alone(tmp_path):

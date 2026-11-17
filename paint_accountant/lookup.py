@@ -433,6 +433,9 @@ def suggest(conn: sqlite3.Connection, barcode: str, item: dict) -> dict[str, Any
     brand = _text(item.get("brand"), 100)
     model = RETAILER_SKU.sub(" ", _text(item.get("model"), 50))
     maker = _find_maker(item, barcode, makers, conn)
+    # a brand we know under another name is cleaned off the title either way — "The Army
+    # Painter" is written "Army Painter" as often as not, and may not be in the catalog yet
+    known = rec.ALIASES.get(rec.norm(brand))
 
     def find_code(title: str) -> str | None:
         """A shop's title can hold any numbers, so only a pattern of this very manufacturer counts."""
@@ -443,6 +446,8 @@ def suggest(conn: sqlite3.Connection, barcode: str, item: dict) -> dict[str, Any
                 return code
             dotless = VALLEJO_CODE.search(title) if maker["name"] == "Vallejo" else None
             return f"{dotless[1]}.{dotless[2]}" if dotless else None
+        if code_maker and code_maker == known:
+            return code  # the brand and the pattern say the same maker, who is simply new here
         if code_maker in rec.TELLING_CODES:
             found = next((m for m in makers if rec.norm(m["name"]) == rec.norm(code_maker)), None)
             if found:
@@ -451,9 +456,9 @@ def suggest(conn: sqlite3.Connection, barcode: str, item: dict) -> dict[str, Any
         return None
 
     names = [brand]
-    if maker:
-        names.append(maker["name"])
-        names += [alias for alias, canonical in rec.ALIASES.items() if rec.norm(canonical) == rec.norm(maker["name"])]
+    for canonical in {n for n in (known, maker["name"] if maker else None) if n}:
+        names.append(canonical)
+        names += [alias for alias, c in rec.ALIASES.items() if rec.norm(c) == rec.norm(canonical)]
 
     def read(shown: str) -> dict[str, Any]:
         title = RETAILER_SKU.sub(" ", shown)  # the shop's own article is not the maker's
@@ -480,8 +485,9 @@ def suggest(conn: sqlite3.Connection, barcode: str, item: dict) -> dict[str, Any
     return {
         "name": best["name"] or None,
         "manufacturer": {"id": maker["id"], "name": maker["name"]} if maker else None,
-        # a brand that isn't in the manufacturers list yet: the form offers to add it
-        "new_manufacturer": rec.clean_name(brand) if brand and not maker else None,
+        # a brand that isn't in the manufacturers list yet: the form offers to add it, under
+        # the name we know it by, so the next pot of theirs finds it instead of adding a second
+        "new_manufacturer": rec.clean_name(known or brand) if brand and not maker else None,
         "code": best["code"],
         "barcode": barcode,
         "tag_ids": best["tag_ids"],
