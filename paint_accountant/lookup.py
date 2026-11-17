@@ -262,6 +262,7 @@ SHOP_WORDS = {
     "brushes", "brushs",  # a title that sells brushes alongside the paints
     # "GENERAL Series Paints … 17ml Singles" — a shelf of 236 pots, not a colour's name
     "series", "singles", "set", "sets", "collection", "assortment", "bundle", "range",
+    "gc",  # how shops shorten Vallejo's Game Color
 }
 
 # the generation of a line, however a shop writes it: "3Gen", "3rd Gen", "3rd Generation",
@@ -271,6 +272,9 @@ GENERATION = re.compile(r"\b\d\s?(?:st|nd|rd|th)?\s?gen(?:eration)?\b|\bgen(?:er
 # said of a listing that carries a line rather than a pot
 RANGE_PHRASES = ["full range", "complete range", "whole range", "full set",
                  "all colors", "all colours", "color chart", "colour chart"]
+
+# a shop's praise, cut whole so that neither word has to be banned on its own
+PUFFERY = ["high quality", "top quality", "best quality", "great value", "brand new"]
 
 # a listing for a whole range rather than for one pot. Looked for in the title as it came,
 # so a word that is dropped as shop noise can still say what the listing is
@@ -285,7 +289,7 @@ CROSS_REFERENCE = re.compile(r"\b(?:for|over|under|with|onto|on)\s+(\w+)", re.I)
 
 # a shop's own letters in front of a number: "GAW21-03" is Citadel's 21-03, "val76515"
 # and "VJP76515" are Vallejo's 76.515, "GAW9918995020406" is a wholesale number of its own
-RETAILER_SKU = re.compile(r"\b(?:GAW|VAL|VJP)(?=\d)", re.I)
+RETAILER_SKU = re.compile(r"\b(?:GAW|VAL|VJP?)(?=\d)", re.I)
 
 # Vallejo prints "76.515" but shops write "76515"; only worth reading when we already know
 # the paint is Vallejo's, since a bare five-digit number proves nothing on its own
@@ -297,9 +301,18 @@ NUMBER = re.compile(r"\d+([.,]\d+)?")
 ARTICLE = re.compile(r"[A-Za-z]{0,4}\d[\d.,\-]{4,}")
 
 
+# a finish, not a colour: on its own it doesn't name a paint, so "Satin Varnish" keeps
+# the word that "Light Grey Wash" drops
+FINISHES = {"satin", "matt", "matte", "gloss", "semigloss", "flat", "clear"}
+
+
 def _is_word(w: str) -> bool:
-    """Something that can be part of a name — not a number and not an article."""
-    return bool(rec.norm(w)) and not NUMBER.fullmatch(w) and not ARTICLE.fullmatch(w)
+    """Something that can be part of a name — not a number, an article or a catalogue code."""
+    if not rec.norm(w) or NUMBER.fullmatch(w) or ARTICLE.fullmatch(w):
+        return False
+    # "MC80" is Vallejo's Model Color 80 as a shop writes it; a word with digits that reads
+    # as some maker's code is a code, whoever's scheme it belongs to
+    return not (any(c.isdigit() for c in w) and rec.find_code(w))
 
 
 def _text(value: Any, limit: int = 300) -> str:
@@ -332,7 +345,9 @@ def _find_maker(item: dict, barcode: str, makers: list[dict], conn: sqlite3.Conn
         for key in sorted(by_name, key=len, reverse=True):
             if len(key) >= 2 and f" {key} " in f" {brand} ":
                 return by_name[key]
-        return None  # a brand we don't have: offered as a new manufacturer, never guessed
+    # A brand that means nothing to us is not the end of it: it is sometimes plainly wrong
+    # ("Upper Deck" on a Vallejo varnish), while the title and the barcode agree with
+    # each other. If these find nobody either, the brand is offered as a new manufacturer.
     for key in sorted(by_name, key=len, reverse=True):
         if len(key) >= 4 and f" {key} " in title:
             return by_name[key]
@@ -370,7 +385,7 @@ def clean_title(title: str, maker_names: list[str], code: str | None, tag_words:
         text = _strip_phrases(text, [code])
     text = rec.VOLUME.sub(" ", text)
     text = GENERATION.sub(" ", text)
-    text = _strip_phrases(text, RANGE_PHRASES)
+    text = _strip_phrases(text, RANGE_PHRASES + PUFFERY)
     text = re.sub(r"\b\d+([.,]\d+)?\s?(g|gr|oz|cc|mm|cm)\b", " ", text, flags=re.I)
 
     filler = rec.STOPWORDS | SHOP_WORDS
@@ -384,7 +399,12 @@ def clean_title(title: str, maker_names: list[str], code: str | None, tag_words:
         while core and rec.norm(core[0]) in tag_words:
             core.pop(0)
         while core and rec.norm(core[-1]) in tag_words:
-            core.pop()
+            # "Satin Varnish" is the paint's name; "Light Grey Wash" is Light Grey in the
+            # Wash line. What is left tells them apart: a colour, or only a finish
+            rest = core[:-1]
+            if not rest or (len(rest) == 1 and rec.norm(rest[0]) in FINISHES):
+                break
+            core = rest
         # the piece that names a colour rather than a range: "MW: Wash: Light Grey" is not
         # called "MW", and "True Metallic Metal Light Paint, Ancient Copper" is a copper
         kinds_here = len([w for w in core if rec.norm(w) in tag_words])
@@ -443,11 +463,12 @@ def suggest(conn: sqlite3.Connection, barcode: str, item: dict) -> dict[str, Any
     def find_code(title: str) -> str | None:
         """A shop's title can hold any numbers, so only a pattern of this very manufacturer counts."""
         nonlocal maker
-        code, code_maker = rec.find_code_with_maker(f"{model} {title}", maker["name"] if maker else None)
+        text = f"{model} {title}"  # a shop writes the code in the title, in "model", or in both
+        code, code_maker = rec.find_code_with_maker(text, maker["name"] if maker else None)
         if maker:
             if code_maker == maker["name"]:
                 return code
-            dotless = VALLEJO_CODE.search(title) if maker["name"] == "Vallejo" else None
+            dotless = VALLEJO_CODE.search(text) if maker["name"] == "Vallejo" else None
             return f"{dotless[1]}.{dotless[2]}" if dotless else None
         if code_maker and code_maker == known:
             return code  # the brand and the pattern say the same maker, who is simply new here

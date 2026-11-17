@@ -433,6 +433,43 @@ def test_an_answer_with_nothing_but_a_range_title(client, monkeypatch):
     assert client.get("/api/lookup/upcitemdb/raw", params={"barcode": "8435568303607"}).json()["answer"] == THIN_ANSWER
 
 
+# a real answer with the shops' titles in it, and with a brand that is plainly wrong:
+# "Upper Deck" makes trading cards. The title and the barcode both say Vallejo
+SATIN_VARNISH = {
+    "ean": "8429551705226",
+    "title": "MC80 Satin Varnish 17ml Model High Quality Acrylicos Vallejo",
+    "brand": "Upper Deck", "model": "VJ70522", "color": "Burgundy", "weight": "1.00 lbs",
+    "offers": [{"title": "Vallejo Satin Varnish, 17ml VJP70522", "price": 11.18},
+               {"title": "70522 Model Color 80 - Satin Varnish- 17 ml Gc", "price": 4.97},
+               {"title": "Val522 - Av Vallejo Model Color 17ml - Satin Varnish", "price": 3.34}],
+}
+
+
+def test_a_wrong_brand_doesnt_settle_who_made_it(client, monkeypatch):
+    _answer(monkeypatch, data={"items": [SATIN_VARNISH]})
+    s = client.get("/api/lookup/upcitemdb", params={"barcode": "8429551705226"}).json()["suggestion"]
+    tags = {t["id"]: t["name"] for t in client.get("/api/tags").json()}
+    assert s["manufacturer"]["name"] == "Vallejo" and s["new_manufacturer"] is None
+    assert s["name"] == "Satin Varnish"  # the kind word is this paint's name, not its line
+    assert s["code"] == "70.522"  # "VJ70522" in the item's model field
+    assert [tags[i] for i in s["tag_ids"]] == ["Лак"]
+
+
+@pytest.mark.parametrize("title, expected", [
+    # what is left when the kind word goes tells them apart: a colour, or only a finish
+    ("Vallejo Satin Varnish 17ml", "Satin Varnish"),
+    ("Vallejo Matt Varnish 17ml", "Matt Varnish"),
+    ("Vallejo Model Wash 35ml - Light Grey Wash", "Light Grey"),
+    # a word with digits that reads as some maker's code is a code, not a name
+    ("MC80 Satin Varnish Model Acrylicos Vallejo", "Satin Varnish"),
+    ("Vallejo 70.950 Black High Quality Acrylic Paint", "Black"),
+])
+def test_a_finish_keeps_its_kind_word(client, monkeypatch, title, expected):
+    _answer(monkeypatch, data={"items": [{"title": title, "brand": "Vallejo"}]})
+    s = client.get("/api/lookup/upcitemdb", params={"barcode": "8429551705226"}).json()["suggestion"]
+    assert s["name"] == expected
+
+
 def test_several_listings_the_one_with_a_name_wins(client, monkeypatch):
     nothing = {"title": "Citadel Base Paint Pot - Games Workshop - All Colors!", "brand": "Citadel Miniatures"}
     _answer(monkeypatch, data={"items": [nothing, MEPHISTON]})
