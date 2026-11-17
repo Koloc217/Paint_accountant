@@ -264,6 +264,14 @@ SHOP_WORDS = {
     "series", "singles", "set", "sets", "collection", "assortment", "bundle", "range",
 }
 
+# the generation of a line, however a shop writes it: "3Gen", "3rd Gen", "3rd Generation",
+# "Gen 3". Never part of a colour's name, and glued ("3Gen") it is not even a word of its own
+GENERATION = re.compile(r"\b\d\s?(?:st|nd|rd|th)?\s?gen(?:eration)?\b|\bgen(?:eration)?\s?\d\b", re.I)
+
+# said of a listing that carries a line rather than a pot
+RANGE_PHRASES = ["full range", "complete range", "whole range", "full set",
+                 "all colors", "all colours", "color chart", "colour chart"]
+
 # a listing for a whole range rather than for one pot. Looked for in the title as it came,
 # so a word that is dropped as shop noise can still say what the listing is
 RANGE_HINTS = {"series", "singles", "range", "set", "sets", "collection", "assortment", "bundle"}
@@ -361,6 +369,8 @@ def clean_title(title: str, maker_names: list[str], code: str | None, tag_words:
         text = rec.strip_code(text, code)
         text = _strip_phrases(text, [code])
     text = rec.VOLUME.sub(" ", text)
+    text = GENERATION.sub(" ", text)
+    text = _strip_phrases(text, RANGE_PHRASES)
     text = re.sub(r"\b\d+([.,]\d+)?\s?(g|gr|oz|cc|mm|cm)\b", " ", text, flags=re.I)
 
     filler = rec.STOPWORDS | SHOP_WORDS

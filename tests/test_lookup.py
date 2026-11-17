@@ -336,8 +336,20 @@ def test_a_listing_of_a_whole_series_names_nothing(client, monkeypatch):
     assert s["manufacturer"]["name"] == "AK"
 
 
+def test_the_same_barcode_under_another_listing_of_the_range(client, monkeypatch):
+    """UPCitemdb changes its mind about a title: the same EAN, now "3Gen … Full Range"."""
+    _answer(monkeypatch, data={"items": [{
+        "title": "AK Interactive 3Gen General Series Full Range Acrylic Paint 17ml",
+        "brand": "AK Interactive"}]})
+    s = client.get("/api/lookup/upcitemdb", params={"barcode": "8435568303607"}).json()["suggestion"]
+    assert s["name"] is None and s["range_only"] is True and s["manufacturer"]["name"] == "AK"
+
+
 @pytest.mark.parametrize("title, name, code", [
     ("AK Interactive Real Colors RC004 Olive Drab 10ml", "Olive Drab", "RC004"),
+    # however a shop writes the generation, it is not part of the colour's name
+    ("AK Interactive AK11021 Satin Black 3rd Generation Acrylic 17ml", "Satin Black", "AK11021"),
+    ("AK 3rd Gen Acrylic AK11127 British Khaki", "British Khaki", "AK11127"),
     ("Real Colors RC-026 Dark Green 10ml", "Dark Green", "RC026"),
     ("AK Interactive Xtreme Metal AK479 Aluminium 30ml", "Aluminium", "AK479"),
 ])
