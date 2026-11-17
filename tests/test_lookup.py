@@ -287,11 +287,11 @@ def test_entities_are_decoded_and_the_colour_beats_the_range(client, monkeypatch
 
 
 @pytest.mark.parametrize("title, brand, name, code, tag", [
-    ("Mr Hobby C137 Aqueous Hobby Color Tire Black 10ml", "GSI Creos", "Tire Black", "C137", None),
+    ("Mr Hobby C137 Aqueous Hobby Color Tire Black 10ml", "GSI Creos", "Tire Black", "C-137", None),
     # "Mr. Color" spelled without the dot still has to go, and lacquer means alcohol-thinned
-    ("Mr. Color C1 White Gloss Lacquer Paint 10ml", "Mr. Hobby", "White Gloss", "C1", "Спиртовая"),
-    ("GSI Creos Mr Metal Color MC211 Chrome Silver", "GSI Creos", "Chrome Silver", "MC211", "Металлик"),
-    ("Mr.Hobby H12 Flat Black Aqueous 10ml", "Mr Hobby", "Flat Black", "H12", None),
+    ("Mr. Color C1 White Gloss Lacquer Paint 10ml", "Mr. Hobby", "White Gloss", "C-1", "Спиртовая"),
+    ("GSI Creos Mr Metal Color MC211 Chrome Silver", "GSI Creos", "Chrome Silver", "MC-211", "Металлик"),
+    ("Mr.Hobby H12 Flat Black Aqueous 10ml", "Mr Hobby", "Flat Black", "H-12", None),
     # another maker's lacquer paint is tagged too, and keeps its own kind of code
     ("Tamiya LP-5 Semi Gloss Black Lacquer Paint 10ml", "Tamiya", "Semi Gloss Black", "LP-5", "Спиртовая"),
 ])
