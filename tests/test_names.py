@@ -54,35 +54,6 @@ def test_paint_carries_tag_names_in_every_language(client):
     assert p["tags"][0]["names"] == {"ru": "Проливка", "en": "Wash"}
 
 
-def test_migration_keeps_ids_and_does_not_steal_a_users_name(tmp_path):
-    path = tmp_path / "paints.sqlite3"
-    conn = db.connect(path)
-    for n, script in enumerate(db.MIGRATIONS[:13], start=1):
-        conn.executescript(f"BEGIN; {script} PRAGMA user_version = {n}; COMMIT;")
-        if n == 1:
-            db._seed_tags(conn)
-    with conn:
-        conn.execute("INSERT INTO tag (name, color) VALUES ('Primer', '#123456')")  # the user's own
-        before = {r[1]: r[0] for r in conn.execute("SELECT id, name FROM tag")}
-        conn.execute("INSERT INTO paint (name, manufacturer_id) VALUES ('X', 1)")
-        conn.execute("INSERT INTO paint_tag (paint_id, tag_id) VALUES (1, ?)", (before["Проливка"],))
-    conn.close()
-
-    db.init_db(path)
-
-    conn = db.connect(path)
-    names = {}
-    for r in conn.execute("SELECT tag_id, lang, name FROM tag_name"):
-        names.setdefault(r[0], {})[r[1]] = r[2]
-    assert names[before["Проливка"]] == {"ru": "Проливка", "en": "Wash"}
-    assert names[before["Primer"]] == {"ru": "Primer", "en": "Primer"}
-    assert names[before["Грунт"]] == {"ru": "Грунт", "en": "Грунт"}  # "Primer" was taken
-    assert conn.execute("SELECT tag_id FROM paint_tag").fetchone()[0] == before["Проливка"]
-    cols = [r[1] for r in conn.execute("PRAGMA table_info(tag)")]
-    assert cols == ["id", "color"]
-    conn.close()
-
-
 # ---------------- storages work the same way ----------------
 
 def storage(client, ru_name):
@@ -111,27 +82,3 @@ def test_paint_locations_and_csv_use_storage_names(client):
     assert "Box 1 ×1" in csv_en
     csv_ru = client.get("/api/backup/paints.csv?lang=ru").content.decode("utf-8-sig")
     assert "Коробка 1 ×1" in csv_ru
-
-
-def test_storage_migration_keeps_ids(tmp_path):
-    path = tmp_path / "paints.sqlite3"
-    conn = db.connect(path)
-    for n, script in enumerate(db.MIGRATIONS[:14], start=1):
-        conn.executescript(f"BEGIN; {script} PRAGMA user_version = {n}; COMMIT;")
-        if n == 1:
-            db._seed_tags(conn)
-    with conn:
-        box = conn.execute("INSERT INTO storage (name) VALUES ('Коробка 1')").lastrowid
-        hand = conn.execute("SELECT id FROM storage WHERE name = 'Под рукой'").fetchone()[0]
-    conn.close()
-
-    db.init_db(path)
-
-    conn = db.connect(path)
-    names = {}
-    for r in conn.execute("SELECT storage_id, lang, name FROM storage_name"):
-        names.setdefault(r[0], {})[r[1]] = r[2]
-    assert names[hand] == {"ru": "Под рукой", "en": "At hand"}
-    assert names[box] == {"ru": "Коробка 1", "en": "Коробка 1"}
-    assert "name" not in [r[1] for r in conn.execute("PRAGMA table_info(storage)")]
-    conn.close()

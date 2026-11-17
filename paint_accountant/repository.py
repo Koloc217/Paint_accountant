@@ -8,8 +8,11 @@ case-sensitive.
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from typing import Any, Iterable
+
+from .textclean import clean_text
 
 
 class NotFound(Exception):
@@ -46,11 +49,43 @@ def register_functions(conn: sqlite3.Connection) -> None:
     conn.create_function(
         "py_lower", 1, lambda s: s.lower() if isinstance(s, str) else s, deterministic=True
     )
+    conn.create_function("py_clean", 1, clean_text, deterministic=True)
 
 
 def _like_pattern(text: str) -> str:
     escaped = text.lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     return f"%{escaped}%"
+
+
+# what the search looks through, per word of the query
+_SEARCH_FIELDS = ("py_lower(p.name)", "py_lower(m.name)", "py_lower(ifnull(p.code, ''))", "ifnull(p.barcode, '')")
+# a code without its dots, dashes and spaces: "70950" finds "70.950", "xf1" finds "XF-1"
+_CODE_SQUASHED = ("replace(replace(replace(replace(py_lower(ifnull(p.code, '')), '.', ''), '-', ''), ' ', ''), '/', '')")
+_SEARCH_TAG = ("EXISTS (SELECT 1 FROM paint_tag pt JOIN tag_name tn ON tn.tag_id = pt.tag_id"
+               " WHERE pt.paint_id = p.id AND py_lower(tn.name) LIKE ? ESCAPE '\\')")
+
+
+def _search_words(q: str | None) -> list[str]:
+    return clean_text(q or "").lower().split()[:10]
+
+
+def _word_clause(word: str) -> tuple[str, list[str]]:
+    """One word of the query must be in the name, the manufacturer, the code, the barcode
+    or a tag name (in any interface language). Every word has to be found somewhere, so
+    "vallejo black" and "black 70.950" narrow the list instead of emptying it."""
+    pattern = _like_pattern(word)
+    parts = [f"{field} LIKE ? ESCAPE '\\'" for field in _SEARCH_FIELDS]
+    args = [pattern] * len(_SEARCH_FIELDS)
+    squashed = re.sub(r"[.\-/\s]", "", word)
+    if squashed and squashed != word:
+        parts.append(f"{_CODE_SQUASHED} LIKE ? ESCAPE '\\'")
+        args.append(_like_pattern(squashed))
+    elif len(squashed) >= 3 and any(ch.isdigit() for ch in squashed):
+        parts.append(f"{_CODE_SQUASHED} LIKE ? ESCAPE '\\'")
+        args.append(pattern)
+    parts.append(_SEARCH_TAG)
+    args.append(pattern)
+    return "(" + " OR ".join(parts) + ")", args
 
 
 def _paint_key(name: str) -> str:
@@ -128,13 +163,13 @@ def _with_names(item: dict, names: dict[int, dict[str, str]]) -> dict:
 
 
 def _clean_names(names: dict | None) -> dict[str, str]:
-    return {lang: v.strip() for lang, v in (names or {}).items() if lang in LANGS and v and v.strip()}
+    return {lang: clean_text(v) for lang, v in (names or {}).items() if lang in LANGS and v and clean_text(v)}
 
 
 def _names_change(changes: dict) -> dict[str, str]:
     """"name" + "lang" -> that language; "name" alone -> every language; plus "names"."""
     names = _clean_names(changes.get("names"))
-    name = (changes.get("name") or "").strip()
+    name = clean_text(changes.get("name") or "")
     if name:
         lang = changes.get("lang")
         names.update({lang: name} if lang in LANGS else {lg: name for lg in LANGS})
@@ -219,7 +254,7 @@ def _check_copies_target(conn: sqlite3.Connection, storage_id: int | None, copie
 
 def create_storage(conn: sqlite3.Connection, data: dict) -> dict:
     """A new storage gets the same name in every language, unless "names" gives some of them."""
-    name = data["name"].strip()
+    name = clean_text(data["name"])
     given = _clean_names(data.get("names"))
     with conn:
         _check_copies_target(conn, None, data.get("copies_storage_id"))
@@ -242,7 +277,7 @@ def create_storage(conn: sqlite3.Connection, data: dict) -> dict:
 def update_storage(conn: sqlite3.Connection, storage_id: int, changes: dict) -> dict:
     """"name" with "lang" renames the storage in that language; "name" alone — in every language."""
     get_storage(conn, storage_id)
-    if "name" in changes and (changes["name"] is None or not changes["name"].strip()):
+    if "name" in changes and (changes["name"] is None or not clean_text(changes["name"])):
         raise InvalidReference("name must not be empty")
     names = _names_change(changes)
     for key in ("name", "lang", "names"):
@@ -320,7 +355,7 @@ def _set_tag_names(conn: sqlite3.Connection, tag_id: int, names: dict[str, str])
 
 def create_tag(conn: sqlite3.Connection, data: dict) -> dict:
     """A new tag gets the same name in every language, unless "names" gives some of them."""
-    name = data["name"].strip()
+    name = clean_text(data["name"])
     given = _clean_names(data.get("names"))
     with conn:
         tag_id = conn.execute("INSERT INTO tag (color) VALUES (?)", (data["color"],)).lastrowid
@@ -359,9 +394,9 @@ _MANUFACTURER_SELECT = """
 def list_manufacturers(conn: sqlite3.Connection, q: str | None = None) -> list[dict]:
     sql = _MANUFACTURER_SELECT
     params: list[Any] = []
-    if q and q.strip():
+    if q and clean_text(q):
         sql += " WHERE py_lower(m.name) LIKE ? ESCAPE '\\'"
-        params.append(_like_pattern(q.strip()))
+        params.append(_like_pattern(clean_text(q)))
     sql += " GROUP BY m.id ORDER BY py_lower(m.name)"
     return _set_unique_counts([dict(r) for r in conn.execute(sql, params)], conn, _MANUFACTURER_PAINTS)
 
@@ -376,13 +411,13 @@ def get_manufacturer(conn: sqlite3.Connection, manufacturer_id: int) -> dict:
 def _find_manufacturer(conn: sqlite3.Connection, name: str, exclude_id: int | None = None) -> int | None:
     row = conn.execute(
         "SELECT id FROM manufacturer WHERE py_lower(name) = py_lower(?) AND id IS NOT ?",
-        (name.strip(), exclude_id),
+        (clean_text(name), exclude_id),
     ).fetchone()
     return row["id"] if row else None
 
 
 def create_manufacturer(conn: sqlite3.Connection, data: dict) -> dict:
-    name = data["name"].strip()
+    name = clean_text(data["name"])
     with conn:
         if _find_manufacturer(conn, name) is not None:
             raise Conflict(f"manufacturer '{name}' already exists")
@@ -392,7 +427,7 @@ def create_manufacturer(conn: sqlite3.Connection, data: dict) -> dict:
 
 def update_manufacturer(conn: sqlite3.Connection, manufacturer_id: int, changes: dict) -> dict:
     get_manufacturer(conn, manufacturer_id)
-    name = (changes.get("name") or "").strip()
+    name = clean_text(changes.get("name") or "")
     if name:
         with conn:
             if _find_manufacturer(conn, name, exclude_id=manufacturer_id) is not None:
@@ -415,7 +450,7 @@ def _resolve_manufacturer(conn: sqlite3.Connection, manufacturer_id: int | None,
         if conn.execute("SELECT 1 FROM manufacturer WHERE id = ?", (manufacturer_id,)).fetchone() is None:
             raise InvalidReference(f"manufacturer {manufacturer_id} does not exist")
         return manufacturer_id
-    name = (name or "").strip()
+    name = clean_text(name or "")
     if not name:
         raise InvalidReference("manufacturer is required")
     found = _find_manufacturer(conn, name)
@@ -568,6 +603,7 @@ def list_paints(
     storage_id: int | None = None,
     no_storage: bool = False,
     tag_ids: list[int] | None = None,
+    no_tags: bool = False,
     at_hand: bool | None = None,
     in_stock: bool | None = None,
     barcode: str | None = None,
@@ -580,12 +616,10 @@ def list_paints(
         keys = sorted({u.strip().strip("{}").lower() for u in uuids if u.strip()})
         where.append(f"p.uuid IN ({','.join('?' * len(keys))})")
         params += keys
-    if q and q.strip():
-        where.append(
-            "(py_lower(p.name) LIKE ? ESCAPE '\\' OR py_lower(m.name) LIKE ? ESCAPE '\\'"
-            " OR py_lower(ifnull(p.code, '')) LIKE ? ESCAPE '\\')"
-        )
-        params += [_like_pattern(q.strip())] * 3
+    for word in _search_words(q):
+        clause, args = _word_clause(word)
+        where.append(clause)
+        params += args
     if manufacturer_id is not None:
         where.append("p.manufacturer_id = ?")
         params.append(manufacturer_id)
@@ -597,9 +631,12 @@ def list_paints(
     elif storage_id is not None:
         where.append("EXISTS (SELECT 1 FROM paint_location l WHERE l.paint_id = p.id AND l.storage_id = ?)")
         params.append(storage_id)
-    for tag_id in sorted(set(tag_ids or [])):  # all given tags must be present
-        where.append("EXISTS (SELECT 1 FROM paint_tag pt WHERE pt.paint_id = p.id AND pt.tag_id = ?)")
-        params.append(tag_id)
+    if no_tags:  # what hasn't been sorted yet; asking for a tag as well would contradict it
+        where.append("NOT EXISTS (SELECT 1 FROM paint_tag pt WHERE pt.paint_id = p.id)")
+    else:
+        for tag_id in sorted(set(tag_ids or [])):  # all given tags must be present
+            where.append("EXISTS (SELECT 1 FROM paint_tag pt WHERE pt.paint_id = p.id AND pt.tag_id = ?)")
+            params.append(tag_id)
     if at_hand is not None:
         hand = ("EXISTS (SELECT 1 FROM paint_location l JOIN storage s ON s.id = l.storage_id"
                 " WHERE l.paint_id = p.id AND s.at_hand = 1)")
@@ -860,6 +897,9 @@ def create_paint(conn: sqlite3.Connection, data: dict, storage_id: Any = AUTO,
     """`storage_id` AUTO puts the pots into the default storage; an explicit id
     (or None for "no storage") puts them there. Several pots into an "at hand"
     storage need allow_duplicate."""
+    data = {**data, "name": clean_text(data["name"])}
+    if not data["name"]:
+        raise InvalidReference("name cannot be empty")
     with conn:
         _check_refs(conn, None if storage_id is AUTO else storage_id, data.get("tag_ids"))
         manufacturer_id = _resolve_manufacturer(conn, data.get("manufacturer_id"), data.get("manufacturer"))
@@ -881,9 +921,9 @@ def update_paint(conn: sqlite3.Connection, paint_id: int, changes: dict) -> dict
     """Name, manufacturer, code, barcode, color, tags. Pots change via add/remove/move."""
     current = get_paint(conn, paint_id)
     if "name" in changes:
-        if changes["name"] is None or not changes["name"].strip():
+        if changes["name"] is None or not clean_text(changes["name"]):
             raise InvalidReference("name cannot be empty")
-        changes["name"] = changes["name"].strip()
+        changes["name"] = clean_text(changes["name"])
 
     tag_ids = changes.pop("tag_ids", None)
     manufacturer_id = changes.pop("manufacturer_id", None)

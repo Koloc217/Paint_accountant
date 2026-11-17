@@ -5,13 +5,15 @@ with the color (hex) when it is set. It can't be imported back: storages, tags a
 settings don't fit into a flat table.
 
 Dump — a .zip with the whole database (paints, storages, tags, manufacturers, label
-keywords, settings including the sign-in password) and the photos folder. Restoring it
-replaces the current catalog; the current one is copied aside first.
+keywords, settings including the sign-in password). Restoring it replaces the current
+catalog; the current one is copied aside first.
 
     paint-accountant-2026-10-30.zip
     ├── manifest.json      app version, schema version, date
-    ├── paints.sqlite3     the database
-    └── photos/…           pictures, if any
+    └── paints.sqlite3     the database
+
+Dumps made by earlier versions may also hold a photos/ folder; it was never filled and
+is skipped on restore.
 """
 
 from __future__ import annotations
@@ -19,21 +21,20 @@ from __future__ import annotations
 import csv
 import io
 import json
-import shutil
 import sqlite3
 import tempfile
 import zipfile
 from datetime import datetime
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 from . import __version__
 from . import repository as repo
 from .config import Settings
-from .db import MIGRATIONS, connect, init_db
+from .db import BASELINE_VERSION, SCHEMA_VERSION, connect, init_db, too_old
 
 DB_NAME = "paints.sqlite3"
 MANIFEST = "manifest.json"
-MAX_DUMP_BYTES = 500 * 1024 * 1024  # uncompressed; a catalog is a few MB, photos add more
+MAX_DUMP_BYTES = 100 * 1024 * 1024  # a catalog is a few MB
 
 # ======================= CSV =======================
 
@@ -101,10 +102,6 @@ def make_dump(settings: Settings) -> bytes:
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
             z.writestr(MANIFEST, json.dumps(manifest, ensure_ascii=False, indent=2))
             z.write(copy, DB_NAME)
-            if settings.photos_dir.is_dir():
-                for f in sorted(settings.photos_dir.rglob("*")):
-                    if f.is_file():
-                        z.write(f, "photos/" + f.relative_to(settings.photos_dir).as_posix())
         return buf.getvalue()
 
 
@@ -126,18 +123,20 @@ def _check_db(path: Path) -> dict:
         raise BadDump("not a Paint Accountant database") from exc
     if not {"paint", "storage", "tag"} <= tables:
         raise BadDump("not a Paint Accountant database")
-    if version > len(MIGRATIONS):
+    if version > SCHEMA_VERSION:
         raise BadDump(f"the dump is from a newer version of the app (schema {version}, "
-                      f"this app knows {len(MIGRATIONS)}) — update the app first")
+                      f"this app knows {SCHEMA_VERSION}) — update the app first")
+    if version < BASELINE_VERSION:
+        raise BadDump(f"the dump can't be restored: {too_old(version)}")
     return {"schema_version": version}
 
 
-def _unpack(data: bytes, into: Path) -> tuple[Path, Path | None]:
-    """Database file and photos folder (if any) from a .zip dump or a bare .sqlite3 file."""
+def _unpack(data: bytes, into: Path) -> Path:
+    """The database file from a .zip dump or a bare .sqlite3 file. Nothing else is taken out."""
     db = into / DB_NAME
     if data[:16] == b"SQLite format 3\x00":
         db.write_bytes(data)
-        return db, None
+        return db
     try:
         z = zipfile.ZipFile(io.BytesIO(data))
     except zipfile.BadZipFile as exc:
@@ -146,30 +145,20 @@ def _unpack(data: bytes, into: Path) -> tuple[Path, Path | None]:
         names = z.namelist()
         if DB_NAME not in names:
             raise BadDump(f"no {DB_NAME} inside the archive — not a Paint Accountant dump")
-        if sum(i.file_size for i in z.infolist()) > MAX_DUMP_BYTES:
+        if z.getinfo(DB_NAME).file_size > MAX_DUMP_BYTES:
             raise BadDump("the archive is too big")
         db.write_bytes(z.read(DB_NAME))
-        photos = into / "photos"
-        for info in z.infolist():
-            rel = PurePosixPath(info.filename)
-            if info.is_dir() or rel.parts[:1] != ("photos",) or len(rel.parts) < 2:
-                continue
-            if any(part in ("..", "") for part in rel.parts) or rel.is_absolute():
-                raise BadDump("unsafe path inside the archive")
-            target = into.joinpath(*rel.parts)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(z.read(info))
-        return db, (photos if photos.is_dir() else None)
+        return db
 
 
 def restore_dump(settings: Settings, data: bytes) -> dict:
     """Replace the catalog with the one from a dump. The current database is copied to
-    paints.before-restore-<date-time>.sqlite3 next to it first (photos to photos.before-restore-…)."""
+    paints.before-restore-<date-time>.sqlite3 next to it first."""
     stamp = datetime.now().strftime("%Y-%m-%d-%H%M%S")
     with tempfile.TemporaryDirectory() as tmp:
-        new_db, new_photos = _unpack(data, Path(tmp))
+        new_db = _unpack(data, Path(tmp))
         info = _check_db(new_db)
-        init_db(new_db)  # an older dump is brought up to this app's schema, in the temp copy
+        init_db(new_db)  # a dump of an earlier schema is brought up to this app's, in the temp copy
 
         live = connect(settings.db_path)
         try:
@@ -188,13 +177,5 @@ def restore_dump(settings: Settings, data: bytes) -> dict:
                       for t in ("paint", "storage", "manufacturer", "tag")}
         finally:
             live.close()
-
-        if new_photos is not None:
-            if settings.photos_dir.is_dir() and any(settings.photos_dir.iterdir()):
-                settings.photos_dir.rename(settings.photos_dir.with_name(f"photos.before-restore-{stamp}"))
-            elif settings.photos_dir.is_dir():
-                settings.photos_dir.rmdir()
-            shutil.copytree(new_photos, settings.photos_dir)
-        settings.ensure_dirs()
 
     return {"restored": True, "from_schema": info["schema_version"], "counts": counts, "previous": saved.name}

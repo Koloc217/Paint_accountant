@@ -55,24 +55,29 @@ def _sorted(paints: list[dict]) -> list[dict]:
     return sorted(paints, key=lambda p: (p["manufacturer"].casefold(), p["name"].casefold(), p["code"] or ""))
 
 
-def _base(p: dict) -> list[str]:
+def _in(item: dict, lang: str) -> str:
+    """A tag's or a storage's name in the language of the export."""
+    return (item.get("names") or {}).get(lang) or item["name"]
+
+
+def _base(p: dict, lang: str) -> list[str]:
     """name (code), #hex, tags — the parts every line starts with."""
     name = p["name"] + (f" ({p['code']})" if p["code"] else "")
     parts = [name]
     if p["hex"]:
         parts.append(p["hex"])
     if p["tags"]:
-        parts.append(", ".join(tg["name"] for tg in p["tags"]))
+        parts.append(", ".join(_in(tg, lang) for tg in p["tags"]))
     return parts
 
 
-def _where(p: dict, tx: dict) -> str:
+def _where(p: dict, tx: dict, lang: str) -> str:
     out = []
     for loc in p["locations"]:
         if not loc["quantity"]:
             continue
         st = loc["storage"]
-        label = st["name"] if st else tx["no_storage"]
+        label = _in(st, lang) if st else tx["no_storage"]
         mark = " ✋" if st and st.get("at_hand") else ""
         out.append(f"{label} ×{loc['quantity']}{mark}")
     return ", ".join(out)
@@ -89,13 +94,13 @@ def _by_maker(paints: list[dict], line) -> list[str]:
     return lines
 
 
-def _short(paints: list[dict]) -> list[str]:
+def _short(paints: list[dict], lang: str) -> list[str]:
     """Just the list: no header, so it can be pasted into any question as is."""
-    lines = _by_maker(paints, lambda p: " — ".join(_base(p)))
+    lines = _by_maker(paints, lambda p: " — ".join(_base(p, lang)))
     return lines[1:]  # no blank line before the first manufacturer
 
 
-def _full(paints: list[dict], tx: dict, filtered: bool) -> list[str]:
+def _full(paints: list[dict], tx: dict, filtered: bool, lang: str) -> list[str]:
     have = [p for p in paints if p["quantity"]]
     gone = [p for p in paints if not p["quantity"]]
     lines = [
@@ -114,8 +119,8 @@ def _full(paints: list[dict], tx: dict, filtered: bool) -> list[str]:
             if not loc["quantity"]:
                 continue
             st = loc["storage"]
-            key = (0, st["name"].casefold(), st["id"]) if st else (1, "", 0)
-            row = stats.setdefault(key, [st["name"] + (" ✋" if st.get("at_hand") else "") if st else tx["no_storage"], 0, 0])
+            key = (0, _in(st, lang).casefold(), st["id"]) if st else (1, "", 0)
+            row = stats.setdefault(key, [_in(st, lang) + (" ✋" if st.get("at_hand") else "") if st else tx["no_storage"], 0, 0])
             row[1] += 1
             row[2] += loc["quantity"]
     if stats:
@@ -123,8 +128,8 @@ def _full(paints: list[dict], tx: dict, filtered: bool) -> list[str]:
         lines += ["- " + tx["storage_line"].format(name=n, paints=k, pots=q) for _, (n, k, q) in sorted(stats.items())]
 
     def line(p: dict) -> str:
-        parts = _base(p)
-        where = _where(p, tx)
+        parts = _base(p, lang)
+        where = _where(p, tx, lang)
         if where:
             parts.append(where)
         if p["barcode"]:
@@ -134,7 +139,7 @@ def _full(paints: list[dict], tx: dict, filtered: bool) -> list[str]:
     lines += _by_maker(have, line)
     if gone:
         lines += ["", f"## {tx['out']}"]
-        lines += ["- " + " — ".join([f"{p['manufacturer']} {_base(p)[0]}", *_base(p)[1:]] +
+        lines += ["- " + " — ".join([f"{p['manufacturer']} {_base(p, lang)[0]}", *_base(p, lang)[1:]] +
                                     ([f"{tx['barcode']} {p['barcode']}"] if p["barcode"] else []))
                   for p in gone]
     return lines
@@ -143,7 +148,8 @@ def _full(paints: list[dict], tx: dict, filtered: bool) -> list[str]:
 def paints_markdown(conn: sqlite3.Connection, level: str = "short", lang: str = "ru", **filters) -> str:
     """The paint list as Markdown. `filters` are those of repository.list_paints;
     any filter given marks the text as a part of the catalog."""
-    tx = TEXT.get(lang, TEXT["ru"])
+    lang = lang if lang in TEXT else "ru"
+    tx = TEXT[lang]
     # False means "not set" for switch-like filters, but in_stock=False is a real choice
     filters = {k: v for k, v in filters.items()
                if v is not None and v != [] and v != "" and (v is not False or k == "in_stock")}
@@ -153,9 +159,9 @@ def paints_markdown(conn: sqlite3.Connection, level: str = "short", lang: str = 
     filters.pop("sort", None)
     paints = _sorted(repo.list_paints(conn, **filters))
     if level == "full":
-        lines = _full(paints, tx, filtered)
+        lines = _full(paints, tx, filtered, lang)
     else:
-        lines = _short(paints)
+        lines = _short(paints, lang)
     if not paints:
         lines += ["", tx["empty"]]
     return "\n".join(lines).strip("\n") + "\n"

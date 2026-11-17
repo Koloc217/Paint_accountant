@@ -23,7 +23,7 @@ def _paint(client, **kw):
 
 
 def test_health_and_starter_tags(client):
-    assert client.get("/api/health").json() == {"status": "ok", "schema_version": len(db.MIGRATIONS)}
+    assert client.get("/api/health").json() == {"status": "ok", "schema_version": db.SCHEMA_VERSION}
     tags = client.get("/api/tags").json()
     names = [t["name"] for t in tags]
     assert "Проливка" in names and "Контраст" in names
@@ -89,6 +89,9 @@ def test_search_and_filters(client):
     assert ids(client.get("/api/paints", params={"in_stock": False})) == {d["id"]}
     assert ids(client.get("/api/paints", params={"tag_id": tags["Проливка"]})) == {a["id"]}
     assert ids(client.get("/api/paints", params=[("tag_id", tags["Проливка"]), ("tag_id", tags["Контраст"])])) == set()
+    assert ids(client.get("/api/paints", params={"no_tags": True})) == {c["id"], d["id"]}
+    # a tag and "no tags at all" contradict each other, so the tag is ignored
+    assert ids(client.get("/api/paints", params=[("no_tags", True), ("tag_id", tags["Проливка"])])) == {c["id"], d["id"]}
     assert ids(client.get("/api/paints", params={"q": "%"})) == set()  # LIKE wildcards are escaped
 
     makers = {m["name"]: m["paint_count"] for m in client.get("/api/manufacturers").json()}
@@ -100,8 +103,8 @@ def test_search_and_filters(client):
 
 
 def test_storages(client):
-    s = client.post("/api/storages", json={"name": "Коробка 2", "nfc_tag": "04:A2:B3"}).json()
-    assert s["at_hand"] is False and s["paint_count"] == 0
+    s = client.post("/api/storages", json={"name": "Коробка 2", "nfc_tag": "  04:A2:B3 "}).json()
+    assert s["at_hand"] is False and s["paint_count"] == 0 and s["nfc_tag"] == "04:A2:B3"
     assert client.post("/api/storages", json={"name": "коробка 2"}).status_code == 409
 
     p = _paint(client, storage_id=s["id"], quantity=3)
@@ -139,12 +142,13 @@ def test_reopen_keeps_data(tmp_path):
         _paint(c)
     with TestClient(create_app(settings)) as c:
         assert len(c.get("/api/paints").json()) == 1
-        assert len(c.get("/api/tags").json()) == 11  # starter tags not duplicated
+        assert len(c.get("/api/tags").json()) == 12  # starter tags not duplicated
 
 
 def test_starter_manufacturers(client):
     names = [m["name"] for m in client.get("/api/manufacturers").json()]
-    assert names == ["AK", "Citadel", "Green Stuff World", "Kaleido", "Kimera", "Scale75", "Tamiya", "Vallejo"]
+    assert names == ["AK", "Army Painter", "Citadel", "Green Stuff World", "Kaleido", "Kimera",
+                     "Mr. Hobby", "Scale75", "Tamiya", "Vallejo"]
 
 
 def test_paint_by_manufacturer_id_or_name(client):
@@ -170,13 +174,15 @@ def test_paint_by_manufacturer_id_or_name(client):
 
 
 def test_manufacturer_crud(client):
-    m = client.post("/api/manufacturers", json={"name": " Army Painter "}).json()
-    assert m["name"] == "Army Painter" and m["paint_count"] == 0
-    assert client.post("/api/manufacturers", json={"name": "army painter"}).status_code == 409
+    # one that a new database doesn't start with, so it is this test's to create and delete
+    m = client.post("/api/manufacturers", json={"name": " Monument Hobbies "}).json()
+    assert m["name"] == "Monument Hobbies" and m["paint_count"] == 0
+    assert client.post("/api/manufacturers", json={"name": "monument hobbies"}).status_code == 409
+    assert client.post("/api/manufacturers", json={"name": "army painter"}).status_code == 409  # a starter one
     assert client.post("/api/manufacturers", json={"name": "  "}).status_code == 422
 
-    r = client.patch(f"/api/manufacturers/{m['id']}", json={"name": "The Army Painter"})
-    assert r.json()["name"] == "The Army Painter"
+    r = client.patch(f"/api/manufacturers/{m['id']}", json={"name": "Monument Hobbies LLC"})
+    assert r.json()["name"] == "Monument Hobbies LLC"
     assert client.patch(f"/api/manufacturers/{m['id']}", json={"name": "citadel"}).status_code == 409
 
     p = _paint(client, manufacturer=None, manufacturer_id=m["id"], name="Matt Black")
@@ -301,3 +307,48 @@ def test_merge_paints_moves_pots_tags_and_picks_barcode(client):
     assert len(client.get("/api/paints?q=Doombull").json()) == 1
     assert client.post(f"/api/paints/{old['id']}/merge", json={"from_id": old["id"]}).status_code == 422
     assert client.post(f"/api/paints/{old['id']}/merge", json={"from_id": 9999}).status_code == 404
+
+
+def test_search_every_word_in_any_field(client):
+    vallejo = client.post("/api/manufacturers", json={"name": "Vallejo2"}).json()["id"]
+    wash = client.post("/api/tags", json={"name": "Смывка", "names": {"en": "Rinse"}}).json()["id"]
+    black = _paint(client, name="Black", manufacturer_id=vallejo, code="70.950", barcode="8429551709507")
+    red = _paint(client, name="Flat Red", manufacturer_id=vallejo, code="70.957", tag_ids=[wash])
+    other = _paint(client, name="Abaddon Black", manufacturer="Citadel", code="21-25")
+
+    def found(q):
+        return {p["id"] for p in client.get("/api/paints", params={"q": q}).json()}
+
+    assert found("black") == {black["id"], other["id"]}
+    assert found("vallejo2 black") == {black["id"]}          # manufacturer + name
+    assert found("black 70.950") == {black["id"]}            # name + code
+    assert found("  BLACK   vallejo2 ") == {black["id"]}     # order, case and spaces don't matter
+    assert found("70950") == {black["id"]}                   # the code without its dot
+    assert found("2125") == {other["id"]}
+    assert found("8429551709507") == {black["id"]}           # barcode
+    assert found("95517") == {black["id"]}                   # a part of it
+    assert found("смывка") == {red["id"]} == found("rinse")  # tag, in either language
+    assert found("vallejo2 смывка") == {red["id"]}
+    assert found("vallejo2 citadel") == set()                # every word must be found
+    assert found("100%") == set() and found("_") == set()    # LIKE wildcards are plain characters
+
+
+def test_names_are_tidied_on_saving(client):
+    p = client.post("/api/paints", json={"name": "  \u200bNuln \t  Oil\u00a0", "manufacturer": "  Citadel ",
+                                         "code": " 24-14 ", "barcode": " 5011921026586 "}).json()
+    assert (p["name"], p["manufacturer"], p["code"], p["barcode"]) == ("Nuln Oil", "Citadel", "24-14", "5011921026586")
+    assert client.patch(f"/api/paints/{p['id']}", json={"name": "   Nuln   Oil 2 "}).json()["name"] == "Nuln Oil 2"
+    assert client.patch(f"/api/paints/{p['id']}", json={"name": "   "}).status_code == 422
+    assert client.post("/api/paints", json={"name": " \u200b ", "manufacturer": "Citadel"}).status_code == 422
+    # a name that differs only by spaces is the same paint
+    assert client.post("/api/paints", json={"name": " Nuln  Oil 2", "manufacturer": "Citadel", "code": "24-14"}
+                       ).status_code == 409
+
+    assert client.post("/api/manufacturers", json={"name": "  Two   Thin  Coats "}).json()["name"] == "Two Thin Coats"
+    tag = client.post("/api/tags", json={"name": "  Глейз ", "names": {"en": " Glaze  "}}).json()
+    assert tag["names"] == {"ru": "Глейз", "en": "Glaze"}
+    assert client.patch(f"/api/tags/{tag['id']}", json={"name": "  Глейз  2 ", "lang": "ru"}).json()["name"] == "Глейз 2"
+    box = client.post("/api/storages", json={"name": "   Коробка   7 "}).json()
+    assert box["name"] == "Коробка 7"
+    assert client.patch(f"/api/storages/{box['id']}", json={"name": " Ящик "}).json()["name"] == "Ящик"
+    assert client.post("/api/storages", json={"name": "ящик  "}).status_code == 409

@@ -208,6 +208,11 @@ STOPWORDS = {
     "only", "the", "and", "of", "new", "formula", "warning", "game", "model", "fl", "oz",
 }
 
+# Printed on a label beside the name — the finish, and what kind of colour it is. Never a
+# name on their own, but they may be part of one, so they only count on a line of their own.
+# Not in STOPWORDS: in a shop's title "White Gloss" is how the colour itself is written.
+LABEL_WORDS = {"gloss", "semigloss", "primary", "basic", "character", "standard"}
+
 # other ways manufacturers appear on labels -> canonical name in the starter list
 ALIASES = {
     "games workshop": "Citadel",
@@ -215,6 +220,10 @@ ALIASES = {
     "ak interactive": "AK",
     "akinteractive": "AK",
     "kimera kolors": "Kimera",
+    # AK prints the line, not the company: "REAL COLORS", "XTREME METAL"
+    "real colors": "AK",
+    "real color": "AK",
+    "xtreme metal": "AK",
     "gsw": "Green Stuff World",
     "green stuf world": "Green Stuff World",
     "greenstuffworld": "Green Stuff World",
@@ -234,6 +243,16 @@ ALIASES = {
     "metal color": "Vallejo",
     "panzer aces": "Vallejo",
     "premium color": "Vallejo",
+    "gsi creos": "Mr. Hobby",
+    "gunze sangyo": "Mr. Hobby",
+    "gunze": "Mr. Hobby",  # how shops name the company that makes them
+    # Mr. Hobby prints the line, not the company: "Mr.COLOR", "AQUEOUS HOBBY COLOR"
+    "mr color": "Mr. Hobby",
+    "mr colour": "Mr. Hobby",
+    "mr metal color": "Mr. Hobby",
+    "mr surfacer": "Mr. Hobby",
+    "mr weathering color": "Mr. Hobby",
+    "aqueous hobby color": "Mr. Hobby",
     "scale 75": "Scale75",
     "scalecolor": "Scale75",
     "fantasy games": "Scale75",  # "Fantasy & Games" line; its logo font is rarely read right
@@ -245,6 +264,8 @@ CODE_PATTERNS: list[tuple[str | None, re.Pattern, Any]] = [
     # Vallejo: 70.xxx Model Color, 71.xxx Model Air, 72.xxx Game Color, 77.xxx Metal Color, 26/28/62/69 etc.
     ("Vallejo", re.compile(r"\b([2-7]\d)\s?[.,·]\s?(\d{3})\b"), lambda m: f"{m[1]}.{m[2]}"),
     ("AK", re.compile(r"\bAK\s?-?\s?(\d{3,5})\b", re.I), lambda m: f"AK{m[1]}"),
+    # AK Real Colors: "RC004". Glued or hyphenated only — "RC 004" is too loose to be a code
+    ("AK", re.compile(r"\bRC-?(\d{3,4})\b", re.I), lambda m: f"RC{m[1]}"),
     ("Army Painter", re.compile(r"\b(WP|CP|GM)\s?(\d{4})\b", re.I), lambda m: f"{m[1].upper()}{m[2]}"),
     ("Tamiya", re.compile(r"\b(XF|X|LP|TS|AS)\s?-\s?(\d{1,3})\b", re.I), lambda m: f"{m[1].upper()}-{m[2]}"),
     # Tamiya prints the catalogue number as "Item 87131" (also "Item No. 81731")
@@ -253,6 +274,11 @@ CODE_PATTERNS: list[tuple[str | None, re.Pattern, Any]] = [
     # Scale75: Fantasy & Games "SFG-38", Scalecolor "SC-12"; OCR may drop the dash of SFG
     ("Scale75", re.compile(r"\b(SFG)\s?-?\s?(\d{2,3})\b", re.I), lambda m: f"{m[1].upper()}-{m[2]}"),
     ("Scale75", re.compile(r"\b(SC)\s?-\s?(\d{2,3})\b", re.I), lambda m: f"{m[1].upper()}-{m[2]}"),
+    # Mr. Hobby: "C137" Mr.Color, "H-35" Aqueous, "MC211" Metal Color, "GX2", "WC01", "UG05",
+    # written out as the bottle has it, with the hyphen, however a shop spells it.
+    # Letters glued to the number, and never telling on their own: "C12" alone proves nothing,
+    # so it counts only once the paint is known to be Mr. Hobby's.
+    ("Mr. Hobby", re.compile(r"\b(GX|SM|MC|WC|UG|C|H)(?:\s?-\s?|)(\d{1,3})\b"), lambda m: f"{m[1].upper()}-{m[2]}"),
     # Green Stuff World: "1750 - PAINT REVITALIZER"
     ("Green Stuff World", re.compile(r"\b(\d{4,5})\s*[-–]\s*[A-Za-z]"), lambda m: m[1]),
 ]
@@ -398,10 +424,12 @@ def _match_manufacturer(lines: list[Line], makers: list[dict]) -> tuple[dict | N
 BARCODE_PREFIXES = {
     "8429551": "Vallejo",
     "8435646": "Green Stuff World",
+    "8436574": "Green Stuff World",
     "5011921": "Citadel",
     "5713799": "Army Painter",
     "8435568": "AK",
     "4950344": "Tamiya",
+    "4973028": "Mr. Hobby",
 }
 PREFIX_LEN = 7
 
@@ -445,6 +473,30 @@ def _mark_background(lines: list[Line], anchors: list[Line]) -> None:
             ln.kind = "background"
 
 
+def reading_order(lines: list[Line]) -> str:
+    """The lines as a person reads them: rows down the label, each row left to right.
+
+    OCR hands back boxes in its own order, and a code printed in two boxes ("H-" beside
+    "35" in its white frame) comes out apart and in the wrong order.
+    """
+    rows: list[list[Line]] = []
+    spans: list[list[float]] = []  # the top and bottom of each row so far
+    for ln in sorted(lines, key=lambda l: l.y):
+        top, bottom = ln.y, ln.y + ln.height
+        for row, span in zip(rows, spans):
+            # on the same row when they overlap vertically — centres are no use, since a
+            # small word beside a tall one ("H-" beside "35") sits wherever it likes
+            overlap = min(bottom, span[1]) - max(top, span[0])
+            if overlap >= 0.4 * min(ln.height, span[1] - span[0]):
+                row.append(ln)
+                span[0], span[1] = min(span[0], top), max(span[1], bottom)
+                break
+        else:
+            rows.append([ln])
+            spans.append([top, bottom])
+    return "  ".join(" ".join(l.text for l in sorted(row, key=lambda l: l.x)) for row in rows)
+
+
 def _tag_ids(text: str, keywords: list[tuple[str, int]]) -> list[int]:
     words = set(norm(text).split())
     return sorted({tag_id for kw, tag_id in keywords if kw.lower() in words})
@@ -478,13 +530,28 @@ def suggest(conn: sqlite3.Connection, reading: Reading) -> dict[str, Any]:
     for ln in maker_lines:
         ln.kind = "manufacturer"
 
-    code, code_maker = find_code_with_maker(full_text, maker["name"] if maker else None)
+    # before the short lines are dropped as noise: a code can be printed in two boxes,
+    # "H-" beside "35", and neither half says much on its own
+    readable = reading_order([ln for ln in lines if id(ln) not in only_foreign and ln.score >= 0.5])
+    code, code_maker = find_code_with_maker(readable, maker["name"] if maker else None)
     if maker is None and code_maker in TELLING_CODES:
         # "70.863" is Vallejo even when the logo is unreadable
         maker = next((m for m in makers if norm(m["name"]) == norm(code_maker)), None)
     if maker is None:
         # the barcode tells the company: 8435646… is Green Stuff World
         maker = next(filter(None, (_maker_by_barcode(conn, b["text"], makers) for b in reading.barcodes)), None)
+
+    if maker:
+        # "MR HOBBY" over the label is read as "MR" and "HOBB": whatever is left of the logo
+        # is still the brand, not the name. Words that name colours are left alone, so a
+        # Green Stuff World pot called "Green" keeps its name
+        keys = {norm(maker["name"])} | {a for a, c in ALIASES.items() if norm(c) == norm(maker["name"])}
+        parts = {w for k in keys for w in k.split() if len(w) >= 3 and w not in GLUE_WORDS}
+        for ln in lines:
+            text = norm(ln.text)
+            if ln.kind == "other" and text and any(
+                    p.startswith(text) or fuzz.ratio(text, p) >= 80 for p in parts):
+                ln.kind = "manufacturer"
 
     code_line = None
     for ln in lines:
@@ -499,7 +566,8 @@ def suggest(conn: sqlite3.Connection, reading: Reading) -> dict[str, Any]:
             ln.kind = "noise"  # a logo read as letters: "AV" -> "NV"
         elif VOLUME.search(ln.text):
             ln.kind = "noise"  # "60ml (2.02 fl.oz.)"
-        elif all(w in keyword_set or w in STOPWORDS or re.fullmatch(r"\d+(ml)?", w) for w in words):
+        elif all(w in keyword_set or w in STOPWORDS or w in LABEL_WORDS or re.fullmatch(r"\d+(ml)?", w)
+                 for w in words):
             if any(w in keyword_set for w in words):
                 ln.kind = "tag"
             else:

@@ -1,18 +1,17 @@
 /* Interface language. Russian text is the key; EN holds the English version.
  * The language is set in config.ini ([ui] language, also from Settings) for every device;
  * the server puts it into <html data-lang>. "auto" means the browser's language. */
-'use strict';
 
-const LANGS = [['ru', 'Русский'], ['en', 'English']];
+export const LANGS = [['ru', 'Русский'], ['en', 'English']];
 
-const LANG_SETTING = ['auto', ...LANGS.map(([code]) => code)].includes(document.documentElement.dataset.lang)
+export const LANG_SETTING = ['auto', ...LANGS.map(([code]) => code)].includes(document.documentElement.dataset.lang)
   ? document.documentElement.dataset.lang : 'auto';
 
-const LANG = LANG_SETTING !== 'auto' ? LANG_SETTING
+export const LANG = LANG_SETTING !== 'auto' ? LANG_SETTING
   : (navigator.language || 'ru').toLowerCase().startsWith('ru') ? 'ru' : 'en';
 
 /** Save the language into config.ini (for every device) and reload. */
-async function setLang(code) {
+export async function setLang(code) {
   const res = await fetch('/api/settings/language', {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ language: code }),
   });
@@ -21,14 +20,14 @@ async function setLang(code) {
 }
 
 /** t('Удалить «{0}»?', name) — the text in the current language with {0}, {1}… filled in. */
-function t(text, ...args) {
+export function t(text, ...args) {
   const s = (LANG === 'en' && EN[text]) || text;
   return args.length ? s.replace(/\{(\d+)\}/g, (m, i) => (args[i] === undefined ? m : String(args[i]))) : s;
 }
 
 /** Names in the page's language anywhere in an API answer: tags and storages carry
  *  "names" ({ru, en}), and "name" becomes the one for this page. */
-function localizeBuiltins(data) {
+export function localizeBuiltins(data) {
   if (data === null || typeof data !== 'object') return data;
   if (Array.isArray(data)) { data.forEach(localizeBuiltins); return data; }
   if (data.names && typeof data.names === 'object' && data.names[LANG]) data.name = data.names[LANG];
@@ -60,7 +59,7 @@ const EN = {
   "⬇ Список красок (CSV)": "⬇ Paint list (CSV)",
   "По производителям, с цветом, если он задан. Открывается в Excel и Google Таблицах. Только для чтения — обратно не загружается.": "By manufacturer, with the color when set. Opens in Excel and Google Sheets. For reading only — it can't be loaded back.",
   "⬇ Полная копия (.zip)": "⬇ Full backup (.zip)",
-  "Вся база и фото — чтобы перенести каталог на другой компьютер или вернуть после сбоя. Пароль входа тоже внутри.": "The whole database and photos — to move the catalog to another computer or bring it back after a failure. The sign-in password is inside too.",
+  "Вся база — чтобы перенести каталог на другой компьютер или вернуть после сбоя. Пароль входа тоже внутри.": "The whole database — to move the catalog to another computer or bring it back after a failure. The sign-in password is inside too.",
   "Загрузите .zip, скачанный выше (здесь или на другом компьютере). Из консоли: ": "Load a .zip downloaded above (here or on another computer). From the console: ",
   "Ошибка {0}": "Error {0}",
   "Нет связи с сервером": "Can't reach the server",
@@ -175,6 +174,7 @@ const EN = {
   "Выбранная сортировка списка сохранится после перезагрузки страницы.": "The chosen list order is kept after the page reloads.",
   "Есть в наличии": "In stock",
   "Закончились": "Out of stock",
+  "🏷 Без тегов": "🏷 No tags",
   "✋ Под рукой": "✋ At hand",
   "Сбросить фильтры": "Reset filters",
   "Ничего не нашлось": "Nothing found",
@@ -237,7 +237,11 @@ const EN = {
   "Тап по кадру — рамка для этикетки.": "Tap the picture for a label frame.",
   "Ещё {0} — похоже на фон": "{0} more — looks like background",
   "Скрыть фон": "Hide background",
+  "Ответ UPCitemdb": "What UPCitemdb answered",
+  "Загружаю…": "Loading…",
   "Скопировано": "Copied",
+  "Не получилось скопировать": "Couldn't copy",
+  "Скопировать": "Copy",
   "Выделите и скопируйте вручную": "Select and copy it by hand",
   "Копировать": "Copy",
   "Поток с камеры здесь недоступен": "Live camera isn't available here",
@@ -276,8 +280,8 @@ const EN = {
   "Хранилище с таким названием уже есть": "A storage with this name already exists",
   "Поиск хранилища": "Search storages",
   "под рукой": "at hand",
-  " · дубликаты → {0}": " · duplicates → {0}",
   " · метка": " · tagged",
+  " · дубликаты → {0}": " · duplicates → {0}",
   "Хранилищ пока нет. Коробки, ящики, полки — всё, где лежат краски.": "No storages yet. Boxes, drawers, shelves — anywhere your paints are.",
   "🖨 QR-метки": "🖨 QR labels",
   "Здесь пока пусто": "Nothing here yet",
@@ -356,6 +360,7 @@ const EN = {
   "Слишком много попыток — подождите {0} с": "Too many attempts — wait {0} s",
   "Забыли пароль? На компьютере с приложением выполните ": "Forgot the password? On the computer running the app, run ",
   " — вход отключится, новый пароль можно задать в настройках.": " — sign-in turns off, and you can set a new password in Settings.",
+  "Текущий пароль": "Current password",
   "Новый пароль": "New password",
   "Не короче 4 символов": "At least 4 characters",
   "Ещё раз": "Repeat",
@@ -386,10 +391,107 @@ const EN = {
   "Сохраняется в config.ini и действует на всех устройствах.": "Saved in config.ini, applies to every device.",
   "💾 Сохранить картинку": "💾 Save image",
   "Не получилось сохранить картинку": "Couldn't save the image",
+  "Найти штрихкод в UPCitemdb": "Look the barcode up at UPCitemdb",
+  "Бесплатные запросы UPCitemdb на сегодня закончились (100 в день)": "Today's free UPCitemdb requests are used up (100 a day)",
+  "Слишком часто — UPCitemdb просит подождать минуту": "Too fast — UPCitemdb asks to wait a minute",
+  "Поиск в UPCitemdb выключен в настройках": "UPCitemdb lookup is turned off in Settings",
+  "Штрихкод для поиска — 8, 12, 13 или 14 цифр": "A barcode to look up is 8, 12, 13 or 14 digits",
+  "Запрос не ушёл: {0}": "The request didn't go out: {0}",
+  "Настройка прокси неверна: {0}": "The proxy setting is wrong: {0}",
+  "Сначала введите или отсканируйте штрихкод": "Type or scan a barcode first",
+  "Ищу {0} в UPCitemdb…": "Looking up {0} at UPCitemdb…",
+  "Осталось запросов на сегодня: {0}": "Requests left today: {0}",
+  "UPCitemdb не знает штрихкод {0}": "UPCitemdb doesn't know barcode {0}",
+  "Заполните поля вручную или по фото этикетки.": "Fill in the fields by hand or from a label photo.",
+  "Нашлось, но новых полей не заполнено": "Found, but no new fields were filled",
+  "Производителя «{0}» ещё нет в списке — добавьте его или выберите другого.": "Manufacturer “{0}” isn't in the list yet — add it or pick another one.",
+  "Подставить название «{0}»": "Use the name “{0}”",
+  "Это объявление на всю линейку — названия и тегов в нём нет. Снимите этикетку или впишите сами.": "This listing covers the whole range — it holds no name or tags. Take a photo of the label, or fill them in yourself.",
+  "Это объявление на всю линейку — названия и тегов в нём нет, впишите сами.": "This listing covers the whole range — it holds no name or tags, so fill them in yourself.",
+  "Проверьте поля: название из магазина бывает неточным.": "Check the fields: a shop's title can be inexact.",
+  "Не получилось найти": "Couldn't look it up",
+  "🔎 Найти в UPCitemdb": "🔎 Find at UPCitemdb",
+  "Сохранено, но сейчас действует переменная окружения PAINT_LOOKUP": "Saved, but the PAINT_LOOKUP environment variable is in effect now",
+  "Кнопка 🔎 у штрихкода спрашивает UPCitemdb, что это за товар, и заполняет форму краски. Отправляется только штрихкод и только по нажатию. Бесплатно: 100 запросов в день.": "The 🔎 button next to a barcode asks UPCitemdb what the product is and fills in the paint form. Only the barcode is sent, and only when you press it. Free: 100 requests a day.",
+  "Сейчас запросы идут через прокси {0}.": "Requests now go through proxy {0}.",
+  "Прокси или сетевой интерфейс": "Proxy or network interface",
+  "Нужно только если UPCitemdb недоступен напрямую. Пусто — напрямую или через системные переменные окружения.": "Needed only where UPCitemdb can't be reached directly. Empty means directly, or through the system's environment variables.",
+  "Прокси": "Proxy",
+  "socks5://, socks5h:// или http://, можно с логином и паролем.": "socks5://, socks5h:// or http://, with a name and password if needed.",
+  "Сетевой интерфейс": "Network interface",
+  "Имя интерфейса (только Linux) или его IP-адрес. Не используется, если задан прокси.": "The interface's name (Linux only) or its IP address. Not used when a proxy is set.",
+  "Проверить связь": "Check the connection",
+  "Проверяю связь…": "Checking…",
+  "Связь есть: {0}": "Reached UPCitemdb: {0}",
+  "Не достучался: {0}": "Couldn't reach it: {0}",
+  "Сохранено, но сейчас действуют переменные окружения: {0}": "Saved, but these environment variables are in effect: {0}",
+  "Сейчас запросы идут через интерфейс {0}.": "Requests now go through interface {0}.",
+  "Сейчас запросы идут напрямую, без прокси.": "Requests now go directly, without a proxy.",
+  "Прокси или сетевой интерфейс задаются в config.ini, раздел [lookup].": "A proxy or a network interface is set in config.ini, section [lookup].",
+  "Поиск штрихкода в интернете": "Online barcode lookup",
 };
 
 // the static parts of index.html
 document.documentElement.lang = LANG;
+/* Messages the server sends with an error are in English (they also go to API clients
+ * and scripts). For the Russian interface they are put into Russian here; a message that
+ * is not in the list is shown as it came. */
+const SERVER_RU = [
+  [/^storage named '(.*)' already exists$/, 'Хранилище «$1» уже есть'],
+  [/^tag named '(.*)' already exists$/, 'Тег «$1» уже есть'],
+  [/^manufacturer '(.*)' already exists$/, 'Производитель «$1» уже есть'],
+  [/^manufacturer '(.*)' still has (\d+) paints$/, 'У производителя «$1» ещё есть краски: $2'],
+  [/^manufacturer is required$/, 'Укажите производителя'],
+  [/^manufacturer \d+ does not exist$/, 'Такого производителя уже нет'],
+  [/^storage \d+ does not exist$/, 'Такого хранилища уже нет'],
+  [/^tags do not exist: .*$/, 'Какого-то из тегов уже нет — обновите страницу'],
+  [/^paints not found: .*$/, 'Каких-то из красок уже нет — обновите страницу'],
+  [/^a storage can't be its own copies storage$/, 'Хранилище не может быть местом для своих же дубликатов'],
+  [/^the default storage can't be deleted; make another storage default first$/,
+    'Хранилище по умолчанию удалить нельзя — сначала сделайте таким другое'],
+  [/^name (must not|cannot) be empty$/, 'Название не может быть пустым'],
+  [/^paint '(.*)' of this manufacturer already exists \(id \d+\); change its quantity instead$/,
+    'Краска «$1» этого производителя уже есть — измените количество банок у неё'],
+  [/^barcode (\S+) already belongs to paint '(.*)' \(id \d+\)$/, 'Штрихкод $1 уже записан у краски «$2»'],
+  [/^not enough pots there$/, 'Там нет столько банок'],
+  [/^not enough pots in that storage$/, 'В этом хранилище нет столько банок'],
+  [/^there are fewer pots than that$/, 'Банок меньше, чем нужно убрать'],
+  [/^from and to are the same$/, 'Откуда и куда — одно и то же хранилище'],
+  [/^no paints given$/, 'Не выбрано ни одной краски'],
+  [/^no tags given$/, 'Не выбрано ни одного тега'],
+  [/^can't merge a paint with itself$/, 'Нельзя объединить краску с самой собой'],
+  [/^wrong password$/, 'Неверный пароль'],
+  [/^too many wrong passwords, wait (\d+) s$/, 'Слишком много неверных паролей, подождите $1 с'],
+  [/^sign in first$/, 'Сначала войдите'],
+  [/^number is too large$/, 'Слишком большое число'],
+  [/^photo recognition is not installed: (.*)$/, 'Распознавание фото не установлено: $1'],
+  [/^send a photo in the request body$/, 'Фото не дошло до сервера'],
+  [/^photo is too large \(max 20 MB\)$/, 'Фото слишком большое (не больше 20 МБ)'],
+  [/^not an image or unsupported format$/, 'Это не картинка, или её формат не поддерживается'],
+  [/^send the dump file in the request body$/, 'Файл копии не дошёл до сервера'],
+  [/^the file is too large$/, 'Файл слишком большой'],
+  [/^the archive is too big$/, 'Архив слишком большой'],
+  [/^the database in the file is damaged$/, 'База в этом файле повреждена'],
+  [/^not a Paint Accountant database$/, 'Это не база Paint Accountant'],
+  [/^expected a \.zip dump \(or a \.sqlite3 database\)$/, 'Нужен .zip с копией (или файл базы .sqlite3)'],
+  [/^no paints\.sqlite3 inside the archive — not a Paint Accountant dump$/,
+    'В архиве нет paints.sqlite3 — это не копия Paint Accountant'],
+  [/^the dump is from a newer version of the app \(schema (\d+), this app knows (\d+)\) — update the app first$/,
+    'Копия сделана более новой версией приложения (схема $1, а эта знает $2) — сначала обновите приложение'],
+  [/^the dump can't be restored: it was made by an old version of the app \(schema (\d+);.*commit (\w+).*$/,
+    'Копия сделана старой версией приложения (схема $1). Восстановите её в приложении версии $2, сделайте там новую копию и загрузите её сюда'],
+  [/^can't write (.*)$/, 'Не получилось записать $1'],
+];
+
+/** A server error message in the interface language. */
+export function serverText(message) {
+  if (LANG !== 'ru' || typeof message !== 'string') return message;
+  for (const [pattern, russian] of SERVER_RU) {
+    if (pattern.test(message)) return message.replace(pattern, russian);
+  }
+  return message;
+}
+
 document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); });
 document.querySelectorAll('[data-i18n-label]').forEach(el => {
   el.setAttribute('aria-label', t(el.dataset.i18nLabel));

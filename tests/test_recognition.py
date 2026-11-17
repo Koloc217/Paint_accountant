@@ -35,6 +35,11 @@ pytest.importorskip("rapidfuzz")
         ("TIAMAT ORANGE SFG 06", None, "SFG-06"),
         ("Inktensity SC-12", None, "SC-12"),
         ("Flat Black", None, None),
+        # Mr. Hobby, as their bottles print it and as shops write it
+        ("H-35 COBALT BLUE", "Mr. Hobby", "H-35"),
+        ("H- 35 AQUEOUS", "Mr. Hobby", "H-35"),
+        ("Mr Hobby H35 Cobalt Blue", "Mr. Hobby", "H-35"),
+        ("MC211 Chrome Silver", "Mr. Hobby", "MC-211"),
     ],
 )
 def test_find_code(text, maker, expected):
@@ -547,3 +552,44 @@ def test_hieroglyphs_are_not_taken_for_the_name(conn):
 def test_mixed_line_keeps_its_latin_part(conn):
     r = suggest(conn, _reading(("CITADEL", 30), ("NULN OIL 油", 70), ("24-14", 25)))
     assert r["suggestion"]["name"] == "Nuln Oil"
+
+
+# A real Mr. Hobby Aqueous bottle, read from a photo of it: the logo comes apart ("MR",
+# "HOBB"), the code is printed in two boxes ("H-" beside "35" in its white frame), the name
+# sits small between the finish and the kind of colour, and the Japanese is to be ignored.
+AQUEOUS_LABEL = [
+    Line(text="MR", score=0.95, x=363, y=673, height=56, width=87),
+    Line(text="35", score=1.00, x=528, y=698, height=77, width=119),
+    Line(text="H-", score=0.94, x=474, y=711, height=52, width=46),
+    Line(text="HOBB", score=1.00, x=356, y=715, height=46, width=85),
+    Line(text="水性ホピーカラー。", score=0.91, x=369, y=752, height=85, width=383),
+    Line(text="AQUEOUS", score=0.94, x=350, y=784, height=125, width=377),
+    Line(text="HOBBY", score=1.00, x=708, y=800, height=45, width=75),
+    Line(text="COLOR", score=1.00, x=704, y=829, height=47, width=81),
+    Line(text="基本色", score=1.00, x=707, y=875, height=49, width=70),
+    Line(text="コバルトブルー", score=0.92, x=477, y=893, height=45, width=207),
+    Line(text="光沢", score=0.98, x=376, y=894, height=42, width=62),
+    Line(text="PRIMARY", score=1.00, x=703, y=903, height=43, width=75),
+    Line(text="COBALT BLUE", score=0.93, x=499, y=922, height=39, width=165),
+    Line(text="GLOSS", score=1.00, x=373, y=923, height=35, width=70),
+]
+
+
+def test_mr_hobby_aqueous_bottle(conn):
+    out = suggest(conn, Reading(lines=[Line(**vars(ln)) for ln in AQUEOUS_LABEL], width=1200, height=1600))
+    s = out["suggestion"]
+    assert s["name"] == "Cobalt Blue"
+    assert s["manufacturer"]["name"] == "Mr. Hobby"
+    assert s["code"] == "H-35"  # "H-" and "35" are one code, written as the bottle has it
+    kinds = {ln["text"]: ln["kind"] for ln in out["lines"]}
+    assert kinds["COBALT BLUE"] == "name"
+    assert kinds["HOBB"] == "manufacturer"  # what is left of the logo is not a name
+    assert kinds["GLOSS"] == "filler" and kinds["PRIMARY"] == "filler"
+    assert kinds["コバルトブルー"] == "noise"  # the name in Japanese is still ignored
+
+
+def test_reading_order_joins_what_sits_on_one_row():
+    """OCR hands back boxes in its own order; a person reads rows, left to right."""
+    order = recognition.reading_order(AQUEOUS_LABEL)
+    assert order.split("  ")[0] == "HOBB MR H- 35"
+    assert "COBALT BLUE" in order

@@ -5,20 +5,23 @@ from __future__ import annotations
 import io
 import os
 import sqlite3
+from dataclasses import replace
 from typing import Iterator, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from starlette.concurrency import run_in_threadpool
 
 from . import repository as repo
-from . import __version__, backup, export, recognition
+from . import __version__, backup, export, lookup, recognition
 from .db import connect
 from .netinfo import lan_url
-from .config import save_language
+from .config import save_language, save_lookup
 from .schemas import (
     BulkIn,
     BulkResult,
     LanguageIn,
+    LookupSettingIn,
+    RouteIn,
     Manufacturer,
     ManufacturerIn,
     MergeIn,
@@ -87,8 +90,13 @@ def health(conn: sqlite3.Connection = Conn) -> dict:
 @router.get("/info", tags=["system"])
 def info(request: Request) -> dict:
     """Version, the address other devices on the network can use (for NFC/QR links), interface language."""
-    return {"version": __version__, "lan_url": lan_url(request.app.state.settings.port),
-            "language": request.app.state.language}
+    settings = request.app.state.settings
+    how = lookup.route(settings)
+    return {"version": __version__, "lan_url": lan_url(settings.port),
+            "language": request.app.state.language,
+            "lookup": {"upcitemdb": settings.lookup_enabled, "via": how.kind, "route": how.label,
+                       "proxy": settings.lookup_proxy or "", "interface": settings.lookup_interface or "",
+                       "from_env": how.from_env}}
 
 
 @router.put("/settings/language", tags=["system"])
@@ -102,6 +110,106 @@ def set_language(body: LanguageIn, request: Request) -> dict:
     request.app.state.language = body.language
     return {"language": body.language, "config_file": str(settings.config_file),
             "overridden_by_env": bool(os.environ.get("PAINT_LANGUAGE"))}
+
+
+@router.put("/settings/lookup", tags=["system"])
+def set_lookup(body: LookupSettingIn, request: Request) -> dict:
+    """Online barcode lookup for every device, saved into config.ini, section [lookup].
+
+    Only what is given changes; an empty proxy or interface clears that one. A proxy is only
+    accepted if it can be parsed — a typo in it would otherwise leave the lookup unreachable
+    with nothing to say why."""
+    settings = request.app.state.settings
+    if body.proxy:
+        try:
+            lookup.parse_proxy(body.proxy)
+        except lookup.LookupFailed as exc:
+            raise HTTPException(422, {"code": exc.code, "message": str(exc)})
+    try:
+        save_lookup(settings.config_file, body.enabled, body.proxy, body.interface)
+    except OSError as exc:
+        raise HTTPException(500, f"can't write {settings.config_file}: {exc}")
+    changed = {}
+    if body.enabled is not None:
+        changed["lookup_enabled"] = body.enabled
+    if body.proxy is not None:
+        changed["lookup_proxy"] = body.proxy.strip() or None
+    if body.interface is not None:
+        changed["lookup_interface"] = body.interface.strip() or None
+    settings = replace(settings, **changed)
+    request.app.state.settings = settings
+    how = lookup.route(settings)
+    overridden = sorted(name for name, var in (("upcitemdb", "PAINT_LOOKUP"), ("proxy", "PAINT_LOOKUP_PROXY"),
+                                               ("interface", "PAINT_LOOKUP_INTERFACE"))
+                        if os.environ.get(var))
+    return {"upcitemdb": settings.lookup_enabled, "proxy": settings.lookup_proxy,
+            "interface": settings.lookup_interface, "via": how.kind, "route": how.label,
+            "config_file": str(settings.config_file), "overridden_by_env": overridden}
+
+
+@router.post("/settings/lookup/check", tags=["system"])
+async def check_lookup(body: RouteIn, request: Request) -> dict:
+    """Try to reach UPCitemdb — by the route given, or by the saved one.
+
+    Opens the connection and closes it without asking anything, so it costs none of the
+    day's hundred requests. Answers {"ok": true} or 502 with what went wrong."""
+    settings = request.app.state.settings
+    if body.proxy or body.interface:
+        how = lookup.Route(proxy=(body.proxy or "").strip() or None,
+                           interface=(body.interface or "").strip() or None)
+    else:
+        how = lookup.route(settings)
+    try:
+        await run_in_threadpool(lookup.check, how)
+    except lookup.LookupFailed as exc:
+        raise HTTPException(_LOOKUP_STATUS.get(exc.code, 502), {"code": exc.code, "message": str(exc)})
+    return {"ok": True, "via": how.kind, "route": how.label}
+
+
+_LOOKUP_STATUS = {
+    "lookup_disabled": 409, "lookup_bad_barcode": 422, "lookup_limit": 429, "lookup_too_fast": 429,
+    "lookup_config": 500, "lookup_unreachable": 502, "lookup_error": 502,
+}
+
+
+@router.get("/lookup/upcitemdb", tags=["photo"])
+async def lookup_upcitemdb(
+    request: Request,
+    barcode: str = Query(..., min_length=8, max_length=20, description="EAN-8, UPC-A, EAN-13 or GTIN-14, digits"),
+) -> dict:
+    """Ask UPCitemdb what this barcode is and turn the answer into suggestions for the paint form.
+
+    The request leaves from the computer running the app (through the proxy or interface from
+    config.ini, if set) and carries only the barcode. `found` is false when UPCitemdb doesn't
+    know it. Errors come as {"code": "lookup_…", "message": …}: 409 turned off, 429 the free
+    limit (100 a day, 6 a minute), 502 no connection."""
+    settings = request.app.state.settings
+
+    def work() -> dict:
+        conn = connect(settings.db_path)
+        try:
+            return lookup.lookup(conn, settings, barcode)
+        finally:
+            conn.close()
+
+    try:
+        return await run_in_threadpool(work)
+    except lookup.LookupFailed as exc:
+        raise HTTPException(_LOOKUP_STATUS.get(exc.code, 502),
+                            {"code": exc.code, "message": str(exc), "reset": exc.reset})
+
+
+@router.get("/lookup/upcitemdb/raw", tags=["photo"])
+def lookup_raw(barcode: str | None = Query(None, description="which one; the newest if left out")) -> dict:
+    """What UPCitemdb answered for a barcode, exactly as it came.
+
+    For looking into a pot whose fields came out wrong: no request is made, so it costs
+    nothing. The last few answers are kept, until the app is restarted."""
+    answer = lookup.last_answer(barcode)
+    if answer is None:
+        raise HTTPException(404, {"code": "lookup_no_answer",
+                                  "message": "this barcode hasn't been looked up since the app started"})
+    return answer
 
 
 @router.get("/qr.svg", tags=["system"], response_class=Response,
@@ -133,6 +241,7 @@ def list_paints(
     storage_id: int | None = None,
     no_storage: bool = Query(False, description="only paints without a storage"),
     tag_id: list[int] = Query([], description="repeat to require several tags"),
+    no_tags: bool = Query(False, description="only paints with no tag at all; ignores tag_id"),
     at_hand: bool | None = Query(None, description="only paints in (or not in) 'at hand' storages"),
     in_stock: bool | None = Query(None, description="true: quantity > 0, false: quantity = 0"),
     barcode: str | None = Query(None, description="exact barcode"),
@@ -149,6 +258,7 @@ def list_paints(
         storage_id=storage_id,
         no_storage=no_storage,
         tag_ids=tag_id,
+        no_tags=no_tags,
         at_hand=at_hand,
         in_stock=in_stock,
         barcode=barcode,
@@ -369,6 +479,22 @@ def delete_tag(tag_id: int, conn: sqlite3.Connection = Conn):
 MAX_UPLOAD = 20 * 1024 * 1024
 
 
+async def read_body(request: Request, limit: int, too_large: str) -> bytes:
+    """The request body, refused as soon as it is known to be over the limit — by its
+    Content-Length, or while it arrives — instead of after all of it is in memory."""
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > limit:
+        raise HTTPException(413, too_large)
+    chunks: list[bytes] = []
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > limit:
+            raise HTTPException(413, too_large)
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 @router.get("/recognize", tags=["photo"])
 def recognize_status() -> dict:
     """Whether photo recognition is installed (it is an optional part)."""
@@ -392,11 +518,9 @@ async def recognize(
     info = recognition.availability()
     if not info["available"]:
         raise HTTPException(503, f"photo recognition is not installed: {info['install']}")
-    data = await request.body()
+    data = await read_body(request, MAX_UPLOAD, "photo is too large (max 20 MB)")
     if not data:
         raise HTTPException(422, "send a photo in the request body")
-    if len(data) > MAX_UPLOAD:
-        raise HTTPException(413, "photo is too large (max 20 MB)")
 
     db_path = request.app.state.settings.db_path
 
@@ -471,11 +595,9 @@ async def backup_dump(request: Request) -> Response:
 async def backup_restore(request: Request) -> dict:
     """Replace the whole catalog with a dump sent as the request body. The current
     database is copied aside first (paints.before-restore-….sqlite3 in the data folder)."""
-    data = await request.body()
+    data = await read_body(request, backup.MAX_DUMP_BYTES, "the file is too large")
     if not data:
         raise HTTPException(422, "send the dump file in the request body")
-    if len(data) > backup.MAX_DUMP_BYTES:
-        raise HTTPException(413, "the file is too large")
     try:
         return await run_in_threadpool(backup.restore_dump, request.app.state.settings, data)
     except backup.BadDump as exc:
