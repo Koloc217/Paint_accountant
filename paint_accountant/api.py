@@ -156,15 +156,15 @@ async def lookup_upcitemdb(
 
 
 @router.get("/lookup/upcitemdb/raw", tags=["photo"])
-def lookup_raw() -> dict:
-    """What UPCitemdb answered for the last barcode asked about, exactly as it came.
+def lookup_raw(barcode: str | None = Query(None, description="which one; the newest if left out")) -> dict:
+    """What UPCitemdb answered for a barcode, exactly as it came.
 
     For looking into a pot whose fields came out wrong: no request is made, so it costs
-    nothing. Only the newest answer is kept, and only until the app is restarted."""
-    answer = lookup.last_answer()
+    nothing. The last few answers are kept, until the app is restarted."""
+    answer = lookup.last_answer(barcode)
     if answer is None:
         raise HTTPException(404, {"code": "lookup_no_answer",
-                                  "message": "nothing has been looked up since the app started"})
+                                  "message": "this barcode hasn't been looked up since the app started"})
     return answer
 
 

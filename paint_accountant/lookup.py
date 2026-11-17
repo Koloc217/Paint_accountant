@@ -495,20 +495,23 @@ def suggest(conn: sqlite3.Connection, barcode: str, item: dict) -> dict[str, Any
 
 _cache: dict[str, tuple[float, dict]] = {}
 
-# The answer to the last barcode actually asked about, kept whole and unread, so that what
-# UPCitemdb really sends can be looked at when a pot comes out wrong. One at a time: this is
-# for the barcode in front of you, not a log.
-_last: dict[str, Any] | None = None
+# The last few answers, kept whole and unread, so that what UPCitemdb really sends can be
+# looked at when a pot comes out wrong. Kept per barcode, because pressing the button again
+# is answered from the day's memory and would otherwise show another pot's answer.
+_raw: dict[str, dict[str, Any]] = {}
+RAW_KEEP = 10
 
 
-def last_answer() -> dict[str, Any] | None:
-    return _last
+def last_answer(barcode: str | None = None) -> dict[str, Any] | None:
+    """The answer to this barcode, or the newest one of all."""
+    if barcode:
+        return _raw.get(re.sub(r"[\s-]", "", barcode))
+    return next(reversed(_raw.values()), None) if _raw else None
 
 
 def clear_cache() -> None:
-    global _last
     _cache.clear()
-    _last = None
+    _raw.clear()
 
 
 def _int(value: str | None) -> int | None:
@@ -535,12 +538,13 @@ def lookup(conn: sqlite3.Connection, settings, barcode: str) -> dict[str, Any]:
     if hit and now - hit[0] < CACHE_SECONDS:
         raw, cached = hit[1], True
     else:
-        global _last
         how = route(settings)
         try:
             status, headers, data = fetch(barcode, how)
-            _last = {"barcode": barcode, "asked_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-                     "status": status, "answer": data}
+            if len(_raw) >= RAW_KEEP:
+                _raw.pop(next(iter(_raw)))
+            _raw[barcode] = {"barcode": barcode, "asked_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                             "status": status, "answer": data}
         except LookupFailed:
             raise
         except (OSError, http.client.HTTPException) as exc:  # includes timeouts and TLS errors

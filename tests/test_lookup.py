@@ -365,14 +365,19 @@ def test_the_raw_answer_is_kept_for_looking_at(client, monkeypatch):
     answer = {"code": "OK", "items": [dict(BRITISH_KHAKI, description="as it came")]}
     _answer(monkeypatch, data=answer)
     client.get("/api/lookup/upcitemdb", params={"barcode": "8435568303607"})
-    raw = client.get("/api/lookup/upcitemdb/raw").json()
+    raw = client.get("/api/lookup/upcitemdb/raw", params={"barcode": "8435568303607"}).json()
     assert raw["barcode"] == "8435568303607" and raw["status"] == 200
     assert raw["answer"] == answer  # whole and unread, offers and all
 
-    # an answer from the day's memory doesn't replace it, and a failure leaves it alone
-    _answer(monkeypatch, status=429, data={"code": "EXCEED_LIMIT"})
+    # another barcode's answer doesn't take its place: pressing the button again is
+    # answered from the day's memory, and must still show this pot's answer
+    _answer(monkeypatch, data={"code": "OK", "items": [MEPHISTON]})
     client.get("/api/lookup/upcitemdb", params={"barcode": "5011921026203"})
-    assert client.get("/api/lookup/upcitemdb/raw").json()["answer"]["code"] == "EXCEED_LIMIT"
+    client.get("/api/lookup/upcitemdb", params={"barcode": "8435568303607"})  # from memory, no request
+    again = client.get("/api/lookup/upcitemdb/raw", params={"barcode": "8435568303607"}).json()
+    assert again == raw
+    assert client.get("/api/lookup/upcitemdb/raw").json()["barcode"] == "5011921026203"  # the newest
+    assert client.get("/api/lookup/upcitemdb/raw", params={"barcode": "4006381333931"}).status_code == 404
 
 
 def test_several_listings_the_one_with_a_name_wins(client, monkeypatch):

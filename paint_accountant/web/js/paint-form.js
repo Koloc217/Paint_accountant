@@ -189,7 +189,7 @@ export async function viewPaintForm(mount, id, prefillStorage = null) {
         otherName ? h('button', { type: 'button', class: 'btn small-btn', style: 'margin-top:6px',
           onclick: e => { name.value = otherName; e.target.remove(); } }, t('Подставить название «{0}»', otherName)) : null,
         h('div', { class: 'muted small' }, t('Проверьте поля: название из магазина бывает неточным.')),
-        rawAnswer(), left].filter(Boolean));
+        rawAnswer(data.barcode), left].filter(Boolean));
     } catch (err) {
       lookupBox.replaceChildren(h('b', null, t('Не получилось найти')), h('div', { class: 'muted small' }, lookupProblem(err)));
     } finally {
@@ -197,7 +197,7 @@ export async function viewPaintForm(mount, id, prefillStorage = null) {
     }
   }
   /** The answer as it came, for when a pot comes out wrong: costs no request. */
-  function rawAnswer() {
+  function rawAnswer(barcode) {
     const box = h('pre', { class: 'raw-answer' });
     const copy = h('button', { type: 'button', class: 'btn small-btn', hidden: true,
       onclick: async () => toast(await copyText(box.textContent) ? t('Скопировано') : t('Не получилось скопировать'),
@@ -207,7 +207,8 @@ export async function viewPaintForm(mount, id, prefillStorage = null) {
       if (!details.open || box.textContent) return;
       box.textContent = t('Загружаю…');
       try {
-        box.textContent = JSON.stringify(await api('GET', '/lookup/upcitemdb/raw'), null, 1);
+        const url = `/lookup/upcitemdb/raw?barcode=${encodeURIComponent(barcode)}`;
+        box.textContent = JSON.stringify(await api('GET', url), null, 1);
         copy.hidden = false;
       } catch (err) { box.textContent = explain(err); }
     }, { once: false });
