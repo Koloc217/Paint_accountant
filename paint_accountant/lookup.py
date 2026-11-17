@@ -262,7 +262,7 @@ SHOP_WORDS = {
     "brushes", "brushs",  # a title that sells brushes alongside the paints
     # "GENERAL Series Paints … 17ml Singles" — a shelf of 236 pots, not a colour's name
     "series", "singles", "set", "sets", "collection", "assortment", "bundle", "range",
-    "gc",  # how shops shorten Vallejo's Game Color
+    "gc", "av",  # how shops shorten Vallejo's Game Color and Acrylicos Vallejo
 }
 
 # the generation of a line, however a shop writes it: "3Gen", "3rd Gen", "3rd Generation",
@@ -304,6 +304,15 @@ ARTICLE = re.compile(r"[A-Za-z]{0,4}\d[\d.,\-]{4,}")
 # a finish, not a colour: on its own it doesn't name a paint, so "Satin Varnish" keeps
 # the word that "Light Grey Wash" drops
 FINISHES = {"satin", "matt", "matte", "gloss", "semigloss", "flat", "clear"}
+
+
+def kind_of(word: str, kinds: set[str]) -> str | None:
+    """The kind of paint this word names, if any — "Washes" is the "wash" we tag by."""
+    n = rec.norm(word)
+    for form in (n, n[:-2] if n.endswith("es") else n, n[:-1] if n.endswith("s") else n):
+        if form in kinds:
+            return form
+    return None
 
 
 def _is_word(w: str) -> bool:
@@ -396,18 +405,19 @@ def clean_title(title: str, maker_names: list[str], code: str | None, tag_words:
         if not kept:
             continue
         core = list(kept)
-        while core and rec.norm(core[0]) in tag_words:
+        while core and kind_of(core[0], tag_words):
             core.pop(0)
-        while core and rec.norm(core[-1]) in tag_words:
+        while core and kind_of(core[-1], tag_words):
             # "Satin Varnish" is the paint's name; "Light Grey Wash" is Light Grey in the
             # Wash line. What is left tells them apart: a colour, or only a finish
             rest = core[:-1]
             if not rest or (len(rest) == 1 and rec.norm(rest[0]) in FINISHES):
                 break
             core = rest
+
         # the piece that names a colour rather than a range: "MW: Wash: Light Grey" is not
         # called "MW", and "True Metallic Metal Light Paint, Ancient Copper" is a copper
-        kinds_here = len([w for w in core if rec.norm(w) in tag_words])
+        kinds_here = len([w for w in core if kind_of(w, tag_words)])
         colour = len(core) - 2 * kinds_here
         if colour > found:
             best, found = rec.clean_name(" ".join(core))[:200], colour
@@ -488,9 +498,9 @@ def suggest(conn: sqlite3.Connection, barcode: str, item: dict) -> dict[str, Any
         title = RETAILER_SKU.sub(" ", shown)  # the shop's own article is not the maker's
         code = find_code(title)
         name = clean_title(title, names, code, kinds)
-        real = {rec.norm(w) for w in name.split()} - kinds
+        real = {rec.norm(w) for w in name.split() if not kind_of(w, kinds)}
         words = set(rec.norm(title).split())
-        said = kinds & words
+        said = {k for k in (kind_of(w, kinds) for w in words) if k}
         # a listing of the whole range names no colour of its own — "Base, Layer, Contrast
         # & Shade", "GENERAL Series … Singles" — and its kinds are not this pot's tags
         a_range = not real and (len(said) > 1 or bool(RANGE_HINTS & words))
@@ -619,8 +629,8 @@ def lookup(conn: sqlite3.Connection, settings, barcode: str) -> dict[str, Any]:
         kinds = tag_words(conn)
 
         def worth(suggestion: dict) -> int:
-            words = {rec.norm(w) for w in (suggestion["name"] or "").split()}
-            return 2 if words - kinds else 1 if words else 0
+            words = [w for w in (suggestion["name"] or "").split()]
+            return 2 if [w for w in words if not kind_of(w, kinds)] else 1 if words else 0
 
         tries = [(item, suggest(conn, barcode, item)) for item in raw["items"]]
         item, suggestion = max(tries, key=lambda pair: worth(pair[1]))

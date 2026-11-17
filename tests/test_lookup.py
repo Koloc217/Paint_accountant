@@ -470,6 +470,40 @@ def test_a_finish_keeps_its_kind_word(client, monkeypatch, title, expected):
     assert s["name"] == expected
 
 
+# another real answer, with a brand that is a holding company and a shop that writes the
+# line in the plural and the maker in its own shorthand
+SEPIA = {
+    "ean": "8429551732000",
+    "title": "Vallejo Sepia Wash, 0.57 Fl Oz (Pack of 1) (VJ73200) (B001TLVRX8)",
+    "brand": "MMD Holdings, LLC", "model": "VJ73200", "color": "Stainless steel",
+    "offers": [{"title": "Vallejo Sepia Wash, 17ml VJP73200"},
+               {"title": "73200 Game Color Paint- Sepia Wash"},
+               {"title": "Sepia Shade Wash MINT/New"},
+               {"title": "Val73200 - Av Washes - Sepia 17ml"}],
+}
+
+
+def test_a_line_in_the_plural_is_still_the_line(client, monkeypatch):
+    """"Av Washes - Sepia" used to be read as a paint called "Av Washes"."""
+    _answer(monkeypatch, data={"items": [SEPIA]})
+    s = client.get("/api/lookup/upcitemdb", params={"barcode": "8429551732000"}).json()["suggestion"]
+    tags = {t["id"]: t["name"] for t in client.get("/api/tags").json()}
+    assert s["name"] == "Sepia" and s["code"] == "73.200"
+    assert s["manufacturer"]["name"] == "Vallejo"  # the brand is a holding company
+    assert [tags[i] for i in s["tag_ids"]] == ["Проливка"]  # "Washes" tags like "Wash"
+
+
+@pytest.mark.parametrize("title, expected", [
+    ("Val73200 - Av Washes - Sepia 17ml", "Sepia"),
+    ("Vallejo Game Inks - Blue 17ml", "Blue"),
+    ("Citadel Shades: Nuln Oil", "Nuln Oil"),
+])
+def test_plural_kinds_and_shop_shorthand(client, monkeypatch, title, expected):
+    _answer(monkeypatch, data={"items": [{"title": title, "brand": "Vallejo"}]})
+    s = client.get("/api/lookup/upcitemdb", params={"barcode": "8429551732000"}).json()["suggestion"]
+    assert s["name"] == expected
+
+
 def test_several_listings_the_one_with_a_name_wins(client, monkeypatch):
     nothing = {"title": "Citadel Base Paint Pot - Games Workshop - All Colors!", "brand": "Citadel Miniatures"}
     _answer(monkeypatch, data={"items": [nothing, MEPHISTON]})
