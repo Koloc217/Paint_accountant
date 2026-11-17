@@ -115,7 +115,7 @@ pytest
 
 ## Web UI
 
-- **Paints** — list with color swatches, search (every word you type is looked for in the name, manufacturer, code, barcode and tags: `vallejo black`, `70950`), filters by storage, manufacturer, tags, "at hand" and stock; quick +/− for the number of pots; add, edit, delete; manufacturer picked from a list, a new one can be added right in the form
+- **Paints** — list with color swatches, search (every word you type is looked for in the name, manufacturer, code, barcode and tags: `vallejo black`, `70950`), filters by storage, manufacturer, tags, "at hand" and stock, plus **🏷 No tags** for what hasn't been sorted into tags yet; quick +/− for the number of pots; add, edit, delete; manufacturer picked from a list, a new one can be added right in the form
 - **List / Table** — on a wide (PC) screen the paint list can be switched to a table: name, manufacturer, code, where the pots lie, tags and the number of pots; click the Name, Manufacturer or Pots header to sort. The choice is remembered on this device; on a phone the list is always used. In the table the number of pots is read-only — change it on the paint's page
 - **Storages** — boxes and drawers with paint and pot counts and a search by name; a storage page has its own search and filters (manufacturer, tags), +/− work in that storage; each storage has a short link `http://<address>:8642/storage/<id>` and its QR code; **🖨 QR labels** makes a printable sheet of labels (pick storages, 3 / 4 / 5.5 cm wide, cut lines) or saves it as a PNG at 300 dpi, so it prints at the chosen size; ✎ next to a storage's name renames it — the phone's camera opens the storage from the label. The address is the computer's LAN IP, so reserve it in your router (DHCP reservation) before printing
 - **Where pots lie** — a paint can be in several storages at once ("At hand 1, Box 2"), and any storage can hold several pots of a paint. When adding you pick a storage (the **default** one is preselected; on a new database it's “At hand”). Adding a second pot of a paint to an **"at hand"** storage asks first: put it there anyway, or into another storage (each storage can name one to suggest). Adding a paint that already lies elsewhere warns about it; when "at hand" runs out, the app offers to take a pot from where it's left. The paint list shows the total over all storages
@@ -128,7 +128,7 @@ No build step and no external libraries — plain HTML, CSS and JavaScript in `p
 
 | Method | Path | What it does |
 |---|---|---|
-| GET | `/api/paints` | list paints; filters: `q` (words; each must be in the name, manufacturer, code, barcode or a tag), `barcode`, `uuid` (repeatable), `manufacturer_id` or `manufacturer` (name), `storage_id`, `no_storage`, `tag_id` (repeatable), `at_hand`, `in_stock` |
+| GET | `/api/paints` | list paints; filters: `q` (words; each must be in the name, manufacturer, code, barcode or a tag), `barcode`, `uuid` (repeatable), `manufacturer_id` or `manufacturer` (name), `storage_id`, `no_storage`, `tag_id` (repeatable), `no_tags` (only paints with no tag at all), `at_hand`, `in_stock` |
 | POST | `/api/paints` | add a paint; give `manufacturer_id`, or `manufacturer` by name (a new name is added to the list) |
 | GET / PATCH / DELETE | `/api/paints/{id}` | read, change (name, manufacturer, code, barcode, color, tags), delete a paint |
 | GET | `/api/paints/by-uuid/{uuid}` | read a paint by its permanent `uuid` |

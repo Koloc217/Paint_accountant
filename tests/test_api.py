@@ -89,6 +89,9 @@ def test_search_and_filters(client):
     assert ids(client.get("/api/paints", params={"in_stock": False})) == {d["id"]}
     assert ids(client.get("/api/paints", params={"tag_id": tags["Проливка"]})) == {a["id"]}
     assert ids(client.get("/api/paints", params=[("tag_id", tags["Проливка"]), ("tag_id", tags["Контраст"])])) == set()
+    assert ids(client.get("/api/paints", params={"no_tags": True})) == {c["id"], d["id"]}
+    # a tag and "no tags at all" contradict each other, so the tag is ignored
+    assert ids(client.get("/api/paints", params=[("no_tags", True), ("tag_id", tags["Проливка"])])) == {c["id"], d["id"]}
     assert ids(client.get("/api/paints", params={"q": "%"})) == set()  # LIKE wildcards are escaped
 
     makers = {m["name"]: m["paint_count"] for m in client.get("/api/manufacturers").json()}

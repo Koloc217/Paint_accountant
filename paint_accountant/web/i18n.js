@@ -174,6 +174,7 @@ const EN = {
   "Выбранная сортировка списка сохранится после перезагрузки страницы.": "The chosen list order is kept after the page reloads.",
   "Есть в наличии": "In stock",
   "Закончились": "Out of stock",
+  "🏷 Без тегов": "🏷 No tags",
   "✋ Под рукой": "✋ At hand",
   "Сбросить фильтры": "Reset filters",
   "Ничего не нашлось": "Nothing found",

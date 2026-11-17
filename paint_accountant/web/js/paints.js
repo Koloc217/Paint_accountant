@@ -47,7 +47,7 @@ function setViewMode(mode) {
 }
 const tableOn = () => wideScreen.matches && viewMode() === 'table';
 
-export const newFilters = () => ({ q: '', storage: '', maker: '', tags: new Set(), atHand: false, stock: '', sort: savedSort() });
+export const newFilters = () => ({ q: '', storage: '', maker: '', tags: new Set(), noTags: false, atHand: false, stock: '', sort: savedSort() });
 export const filters = newFilters();          // the main paint list
 export const storageFilters = new Map();      // one set per storage page, kept while you move around
 
@@ -59,7 +59,7 @@ function resetFiltersOf(f) {
 export function resetListFilters() { resetFiltersOf(filters); }
 
 function anyFilterIn(f, storageId = null) {
-  return Boolean(f.q.trim() || (!storageId && f.storage) || f.maker || f.tags.size || f.atHand || f.stock);
+  return Boolean(f.q.trim() || (!storageId && f.storage) || f.maker || f.tags.size || f.noTags || f.atHand || f.stock);
 }
 
 /**
@@ -259,12 +259,23 @@ export function paintBrowser({ f, storageId = null, tags, storages, makers, empt
     h('option', { value: 'new' }, t('Недавно добавленные')));
   sortSel.value = f.sort;
 
+  // "no tags" and a tag are opposites: turning one on turns the other off
+  const noTagsChip = toggleChip(t('🏷 Без тегов'), {
+    plain: true,
+    pressed: f.noTags,
+    onToggle: v => { f.noTags = v; if (v && f.tags.size) { f.tags.clear(); render(); } else refresh(); },
+  });
   const chips = h('div', { class: 'chips-scroll' },
     storageId ? null : toggleChip(t('✋ Под рукой'), { plain: true, pressed: f.atHand, onToggle: v => { f.atHand = v; refresh(); } }),
+    tags.length ? noTagsChip : null,
     tags.map(tg => toggleChip(tg.name, {
       color: tg.color,
       pressed: f.tags.has(tg.id),
-      onToggle: v => { v ? f.tags.add(tg.id) : f.tags.delete(tg.id); refresh(); },
+      onToggle: v => {
+        v ? f.tags.add(tg.id) : f.tags.delete(tg.id);
+        if (v && f.noTags) { f.noTags = false; noTagsChip.setAttribute('aria-pressed', 'false'); }
+        refresh();
+      },
     })));
 
   const here = p => (storageId
@@ -299,7 +310,8 @@ export function paintBrowser({ f, storageId = null, tags, storages, makers, empt
     else if (f.storage === 'none') params.set('no_storage', 'true');
     else if (f.storage) params.set('storage_id', f.storage);
     if (f.maker) params.set('manufacturer_id', f.maker);
-    f.tags.forEach(id => params.append('tag_id', id));
+    if (f.noTags) params.set('no_tags', 'true');
+    else f.tags.forEach(id => params.append('tag_id', id));
     if (f.atHand && !storageId) params.set('at_hand', 'true');
     if (f.stock && !storageId) params.set('in_stock', f.stock === 'in' ? 'true' : 'false');
     return params;

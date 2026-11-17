@@ -603,6 +603,7 @@ def list_paints(
     storage_id: int | None = None,
     no_storage: bool = False,
     tag_ids: list[int] | None = None,
+    no_tags: bool = False,
     at_hand: bool | None = None,
     in_stock: bool | None = None,
     barcode: str | None = None,
@@ -630,9 +631,12 @@ def list_paints(
     elif storage_id is not None:
         where.append("EXISTS (SELECT 1 FROM paint_location l WHERE l.paint_id = p.id AND l.storage_id = ?)")
         params.append(storage_id)
-    for tag_id in sorted(set(tag_ids or [])):  # all given tags must be present
-        where.append("EXISTS (SELECT 1 FROM paint_tag pt WHERE pt.paint_id = p.id AND pt.tag_id = ?)")
-        params.append(tag_id)
+    if no_tags:  # what hasn't been sorted yet; asking for a tag as well would contradict it
+        where.append("NOT EXISTS (SELECT 1 FROM paint_tag pt WHERE pt.paint_id = p.id)")
+    else:
+        for tag_id in sorted(set(tag_ids or [])):  # all given tags must be present
+            where.append("EXISTS (SELECT 1 FROM paint_tag pt WHERE pt.paint_id = p.id AND pt.tag_id = ?)")
+            params.append(tag_id)
     if at_hand is not None:
         hand = ("EXISTS (SELECT 1 FROM paint_location l JOIN storage s ON s.id = l.storage_id"
                 " WHERE l.paint_id = p.id AND s.at_hand = 1)")
