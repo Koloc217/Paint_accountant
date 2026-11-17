@@ -403,9 +403,12 @@ def tag_words(conn: sqlite3.Connection) -> set[str]:
 def titles(item: dict) -> list[str]:
     """Every title this listing goes by: the main one, then each shop's own.
 
-    UPCitemdb picks one title for an item, and it is often a listing for the whole
-    range ("Citadel Paint Pot - Base, Layer, Contrast & Shade"); the shops' titles
-    under `offers` are where the colour's own name usually is.
+    UPCitemdb picks one title for an item, and it is often a listing for the whole range
+    ("Citadel Paint Pot - Base, Layer, Contrast & Shade"), while the colour's own name is
+    in a shop's title under `offers`. Mind that the free plan often answers with `offers`
+    empty and `brand`, `model` and `color` blank, whatever the site shows for that barcode:
+    then the one title is all there is, and the manufacturer has to come from it or from
+    the barcode itself.
     """
     found, seen = [], set()
     offers = item.get("offers") if isinstance(item.get("offers"), list) else []

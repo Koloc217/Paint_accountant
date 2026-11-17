@@ -408,6 +408,31 @@ def test_a_code_is_kept_when_the_brand_and_the_pattern_agree(client, monkeypatch
     assert s["code"] == "WP3001" and s["new_manufacturer"] == "Army Painter"
 
 
+# an answer of the free plan, word for word: one item, no offers, and brand, model and
+# colour all blank, though the site shows three titles and a brand for this barcode
+THIN_ANSWER = {
+    "code": "OK", "total": 1, "offset": 0,
+    "items": [{"ean": "8435568303607",
+               "title": "AK Interactive 3Gen General Series Full Range Acrylic Paint 17ml",
+               "description": "", "elid": "188561759753", "brand": "", "model": "", "color": "",
+               "size": "", "dimension": "", "weight": "",
+               "category": "Toys & Games > Toys > Play Vehicle Accessories",
+               "lowest_recorded_price": 3.99, "highest_recorded_price": 8.52,
+               "images": [], "offers": []}],
+}
+
+
+def test_an_answer_with_nothing_but_a_range_title(client, monkeypatch):
+    """Nothing can be made of it but the manufacturer — which the barcode itself gives."""
+    _answer(monkeypatch, data=THIN_ANSWER)
+    d = client.get("/api/lookup/upcitemdb", params={"barcode": "8435568303607"}).json()
+    assert d["found"] is True
+    s = d["suggestion"]
+    assert s["name"] is None and s["code"] is None and s["tag_ids"] == [] and s["range_only"] is True
+    assert s["manufacturer"]["name"] == "AK"  # from 8435568, since the brand came blank
+    assert client.get("/api/lookup/upcitemdb/raw", params={"barcode": "8435568303607"}).json()["answer"] == THIN_ANSWER
+
+
 def test_several_listings_the_one_with_a_name_wins(client, monkeypatch):
     nothing = {"title": "Citadel Base Paint Pot - Games Workshop - All Colors!", "brand": "Citadel Miniatures"}
     _answer(monkeypatch, data={"items": [nothing, MEPHISTON]})
