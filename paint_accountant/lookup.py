@@ -268,9 +268,13 @@ EXTRA_KINDS = {"dry", "spray", "sprays"}
 # "...Pot Paint For Base": the pot is a Technical one, Base is just what it goes over
 CROSS_REFERENCE = re.compile(r"\b(?:for|over|under|with|onto|on)\s+(\w+)", re.I)
 
-# a shop's own article in front of the maker's: "GAW21-03" is Citadel's 21-03,
-# and "GAW9918995020406" is a wholesale number with nothing of ours in it
-RETAILER_SKU = re.compile(r"\bGAW(?=\d)", re.I)
+# a shop's own letters in front of a number: "GAW21-03" is Citadel's 21-03, "val76515"
+# and "VJP76515" are Vallejo's 76.515, "GAW9918995020406" is a wholesale number of its own
+RETAILER_SKU = re.compile(r"\b(?:GAW|VAL|VJP)(?=\d)", re.I)
+
+# Vallejo prints "76.515" but shops write "76515"; only worth reading when we already know
+# the paint is Vallejo's, since a bare five-digit number proves nothing on its own
+VALLEJO_CODE = re.compile(r"\b([2-7]\d)(\d{3})\b")
 SEPARATORS = re.compile(r"\s+[-–—|/:]\s+|[|,;:(){}\[\]]")
 NUMBER = re.compile(r"\d+([.,]\d+)?")
 # an article number rather than a word: five or more digits, with a few letters or dashes
@@ -345,23 +349,23 @@ def clean_title(title: str, maker_names: list[str], code: str | None, tag_words:
     text = re.sub(r"\b\d+([.,]\d+)?\s?(g|gr|oz|cc|mm|cm)\b", " ", text, flags=re.I)
 
     filler = rec.STOPWORDS | SHOP_WORDS
-    fallback = ""
+    best, found, fallback = "", 0, ""
     for piece in SEPARATORS.split(text):
-        words = piece.replace("#", " ").split()
-        meaningful = [w for w in words if _is_word(w) and rec.norm(w) not in filler]
-        if not meaningful:
-            continue
         # drop filler everywhere, kind-of-paint words only at the edges
-        kept = [w for w in words if _is_word(w) and rec.norm(w) not in filler]
+        kept = [w for w in piece.replace("#", " ").split() if _is_word(w) and rec.norm(w) not in filler]
+        if not kept:
+            continue
         core = list(kept)
         while core and rec.norm(core[0]) in tag_words:
             core.pop(0)
         while core and rec.norm(core[-1]) in tag_words:
             core.pop()
-        if core:
-            return rec.clean_name(" ".join(core))[:200]
-        fallback = fallback or rec.clean_name(" ".join(kept))[:200]
-    return fallback
+        # the piece that names the most — "MW: Wash: Light Grey" is not called "MW"
+        colour = len([w for w in core if rec.norm(w) not in tag_words])
+        if colour > found:
+            best, found = rec.clean_name(" ".join(core))[:200], colour
+        fallback = fallback or rec.clean_name(" ".join(core or kept))[:200]
+    return best or fallback
 
 
 def tag_words(conn: sqlite3.Connection) -> set[str]:
@@ -408,7 +412,10 @@ def suggest(conn: sqlite3.Connection, barcode: str, item: dict) -> dict[str, Any
         nonlocal maker
         code, code_maker = rec.find_code_with_maker(f"{model} {title}", maker["name"] if maker else None)
         if maker:
-            return code if code_maker == maker["name"] else None
+            if code_maker == maker["name"]:
+                return code
+            dotless = VALLEJO_CODE.search(title) if maker["name"] == "Vallejo" else None
+            return f"{dotless[1]}.{dotless[2]}" if dotless else None
         if code_maker in rec.TELLING_CODES:
             found = next((m for m in makers if rec.norm(m["name"]) == rec.norm(code_maker)), None)
             if found:

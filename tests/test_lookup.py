@@ -94,6 +94,9 @@ TAG_WORDS = {"metallic", "metal", "shade", "wash", "primer", "contrast", "ink", 
      ["Games Workshop", "Citadel"], "21-55", "Runelord Brass"),
     ("Runelord Brass Base Paint 12ml", ["Citadel"], None, "Runelord Brass"),
     ("Citadel Base: Runelord Brass", ["Citadel"], None, "Runelord Brass"),
+    # the piece that names the most wins, so a shop's shorthand doesn't become the name
+    ("MW: Wash: Light Grey (35 ml.)", ["Vallejo"], None, "Light Grey"),
+    ("(76515) - Av Model Wash 35ml - Light Grey Wash", ["Vallejo"], "76.515", "Light Grey"),
 ])
 def test_clean_title(title, names, code, expected):
     assert lookup.clean_title(title, names, code, TAG_WORDS) == expected
@@ -234,6 +237,37 @@ def test_two_kinds_that_are_both_the_paints_own_are_kept(client, monkeypatch):
     s = _suggest(client, None, "8429551727747")
     tags = {t["id"]: t["name"] for t in client.get("/api/tags").json()}
     assert sorted(tags[i] for i in s["tag_ids"]) == ["Для аэрографа", "Металлик"]
+
+
+# a Vallejo wash: its own title is all shorthand, and the shops write the code without
+# the dot Vallejo prints ("76515", "val76515", "VJP76515") — the same paint as 76.515
+LIGHT_GREY = {
+    "ean": "8429551765152",
+    "title": "MW: Wash: Light Grey (35 ml.)",
+    "brand": "Acrylicos Vallejo",
+    "offers": [{"title": "(val76515) - Av Model Wash 35ml - Light Grey Wash"},
+               {"title": "Vallejo Light Grey Wash, 35ml"},
+               {"title": "76515 Model Wash Light Grey, 35 ml"},
+               {"title": "Vallejo Light Grey Wash, 35ml VJP76515"}],
+}
+
+
+def test_vallejo_wash_and_its_dotless_code(client, monkeypatch):
+    _answer(monkeypatch, data={"items": [LIGHT_GREY]})
+    s = client.get("/api/lookup/upcitemdb", params={"barcode": "8429551765152"}).json()["suggestion"]
+    tags = {t["id"]: t["name"] for t in client.get("/api/tags").json()}
+    assert s["name"] == "Light Grey" and s["manufacturer"]["name"] == "Vallejo"
+    assert s["code"] == "76.515"  # written as Vallejo prints it, so the label matches
+    assert [tags[i] for i in s["tag_ids"]] == ["Проливка"]
+
+
+def test_a_bare_five_digit_number_is_a_code_only_for_vallejo(client, monkeypatch):
+    """Vallejo's dotless code is read because the brand says Vallejo; for others it proves nothing."""
+    _answer(monkeypatch, data={"items": [{"title": "Pro Acryl 76515 Bold Titanium White 22ml",
+                                          "brand": "Monument Hobbies"}]})
+    s = client.get("/api/lookup/upcitemdb", params={"barcode": "0850025932011"}).json()["suggestion"]
+    assert s["code"] is None and s["manufacturer"] is None
+    assert s["new_manufacturer"] == "Monument Hobbies"
 
 
 def test_several_listings_the_one_with_a_name_wins(client, monkeypatch):
