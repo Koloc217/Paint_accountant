@@ -495,9 +495,20 @@ def suggest(conn: sqlite3.Connection, barcode: str, item: dict) -> dict[str, Any
 
 _cache: dict[str, tuple[float, dict]] = {}
 
+# The answer to the last barcode actually asked about, kept whole and unread, so that what
+# UPCitemdb really sends can be looked at when a pot comes out wrong. One at a time: this is
+# for the barcode in front of you, not a log.
+_last: dict[str, Any] | None = None
+
+
+def last_answer() -> dict[str, Any] | None:
+    return _last
+
 
 def clear_cache() -> None:
+    global _last
     _cache.clear()
+    _last = None
 
 
 def _int(value: str | None) -> int | None:
@@ -524,9 +535,12 @@ def lookup(conn: sqlite3.Connection, settings, barcode: str) -> dict[str, Any]:
     if hit and now - hit[0] < CACHE_SECONDS:
         raw, cached = hit[1], True
     else:
+        global _last
         how = route(settings)
         try:
             status, headers, data = fetch(barcode, how)
+            _last = {"barcode": barcode, "asked_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                     "status": status, "answer": data}
         except LookupFailed:
             raise
         except (OSError, http.client.HTTPException) as exc:  # includes timeouts and TLS errors

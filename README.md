@@ -147,6 +147,7 @@ No build step and no external libraries — plain HTML, CSS and JavaScript in `p
 | POST | `/api/recognize` | send a photo as the body (`Content-Type: image/jpeg`); returns label text, barcodes, form suggestions and matching paints; `?barcode_only=true` skips text (for live camera frames) |
 | PUT | `/api/settings/language` | `{"language": "auto" \| "ru" \| "en"}` — saved into `config.ini` |
 | PUT | `/api/settings/lookup` | `{"enabled": true \| false}` — online barcode lookup on or off, saved into `config.ini` |
+| GET | `/api/lookup/upcitemdb/raw` | what UPCitemdb answered for the last barcode asked about, exactly as it came (no request is made); **What UPCitemdb answered** under the lookup result shows it |
 | GET | `/api/lookup/upcitemdb?barcode=…` | ask UPCitemdb about a barcode: `found`, the raw `item` (title, brand…) and a `suggestion` for the form (name, manufacturer or `new_manufacturer`, code, tag ids), `remaining` requests today; errors carry `detail.code`: `lookup_disabled` (409), `lookup_limit` / `lookup_too_fast` (429), `lookup_unreachable` (502) |
 | GET | `/api/qr.svg?data=…` | QR code as SVG (for storage labels) |
 | GET | `/api/auth` | whether sign-in is on and this device is signed in |

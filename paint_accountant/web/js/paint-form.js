@@ -1,7 +1,7 @@
 /* A paint's page: adding a new one and editing. */
 
 import { t } from '../i18n.js';
-import { api, ApiError, countPots, explain, h, normHex, toast } from './core.js';
+import { api, ApiError, copyText, countPots, explain, h, normHex, toast } from './core.js';
 import {
   addPots, askAboutDuplicate, confirmDialog, deleteButton, isDuplicate, isPaintExists, locationsEditor,
   mergeDialog, pageHead, placementBody, placementSelect, setSwatch, showNotice, swatch, toggleChip,
@@ -188,13 +188,32 @@ export async function viewPaintForm(mount, id, prefillStorage = null) {
           ? h('div', { class: 'muted small' }, t('Производителя «{0}» ещё нет в списке — добавьте его или выберите другого.', s.new_manufacturer)) : null,
         otherName ? h('button', { type: 'button', class: 'btn small-btn', style: 'margin-top:6px',
           onclick: e => { name.value = otherName; e.target.remove(); } }, t('Подставить название «{0}»', otherName)) : null,
-        h('div', { class: 'muted small' }, t('Проверьте поля: название из магазина бывает неточным.')), left].filter(Boolean));
+        h('div', { class: 'muted small' }, t('Проверьте поля: название из магазина бывает неточным.')),
+        rawAnswer(), left].filter(Boolean));
     } catch (err) {
       lookupBox.replaceChildren(h('b', null, t('Не получилось найти')), h('div', { class: 'muted small' }, lookupProblem(err)));
     } finally {
       lookupBtn.disabled = false;
     }
   }
+  /** The answer as it came, for when a pot comes out wrong: costs no request. */
+  function rawAnswer() {
+    const box = h('pre', { class: 'raw-answer' });
+    const copy = h('button', { type: 'button', class: 'btn small-btn', hidden: true,
+      onclick: async () => toast(await copyText(box.textContent) ? t('Скопировано') : t('Не получилось скопировать'),
+        'ok') }, t('Скопировать'));
+    const details = h('details', { class: 'raw-details' }, h('summary', null, t('Ответ UPCitemdb')), box, copy);
+    details.addEventListener('toggle', async () => {
+      if (!details.open || box.textContent) return;
+      box.textContent = t('Загружаю…');
+      try {
+        box.textContent = JSON.stringify(await api('GET', '/lookup/upcitemdb/raw'), null, 1);
+        copy.hidden = false;
+      } catch (err) { box.textContent = explain(err); }
+    }, { once: false });
+    return details;
+  }
+
   lookupBtn.addEventListener('click', () => lookupOnline());
 
   // ---- add by photo (new paints only; optional part of the app)

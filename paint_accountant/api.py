@@ -155,6 +155,19 @@ async def lookup_upcitemdb(
                             {"code": exc.code, "message": str(exc), "reset": exc.reset})
 
 
+@router.get("/lookup/upcitemdb/raw", tags=["photo"])
+def lookup_raw() -> dict:
+    """What UPCitemdb answered for the last barcode asked about, exactly as it came.
+
+    For looking into a pot whose fields came out wrong: no request is made, so it costs
+    nothing. Only the newest answer is kept, and only until the app is restarted."""
+    answer = lookup.last_answer()
+    if answer is None:
+        raise HTTPException(404, {"code": "lookup_no_answer",
+                                  "message": "nothing has been looked up since the app started"})
+    return answer
+
+
 @router.get("/qr.svg", tags=["system"], response_class=Response,
             responses={200: {"content": {"image/svg+xml": {}}}})
 def qr_code(data: str = Query(..., min_length=1, max_length=500, description="text or link to encode")) -> Response:

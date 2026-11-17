@@ -359,6 +359,22 @@ def test_ak_lines_and_their_codes(client, monkeypatch, title, name, code):
     assert (s["name"], s["code"], s["manufacturer"]["name"]) == (name, code, "AK")
 
 
+def test_the_raw_answer_is_kept_for_looking_at(client, monkeypatch):
+    """A pot that comes out wrong: what UPCitemdb really sent, without spending a request."""
+    assert client.get("/api/lookup/upcitemdb/raw").status_code == 404
+    answer = {"code": "OK", "items": [dict(BRITISH_KHAKI, description="as it came")]}
+    _answer(monkeypatch, data=answer)
+    client.get("/api/lookup/upcitemdb", params={"barcode": "8435568303607"})
+    raw = client.get("/api/lookup/upcitemdb/raw").json()
+    assert raw["barcode"] == "8435568303607" and raw["status"] == 200
+    assert raw["answer"] == answer  # whole and unread, offers and all
+
+    # an answer from the day's memory doesn't replace it, and a failure leaves it alone
+    _answer(monkeypatch, status=429, data={"code": "EXCEED_LIMIT"})
+    client.get("/api/lookup/upcitemdb", params={"barcode": "5011921026203"})
+    assert client.get("/api/lookup/upcitemdb/raw").json()["answer"]["code"] == "EXCEED_LIMIT"
+
+
 def test_several_listings_the_one_with_a_name_wins(client, monkeypatch):
     nothing = {"title": "Citadel Base Paint Pot - Games Workshop - All Colors!", "brand": "Citadel Miniatures"}
     _answer(monkeypatch, data={"items": [nothing, MEPHISTON]})
