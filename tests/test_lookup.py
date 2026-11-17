@@ -97,6 +97,9 @@ TAG_WORDS = {"metallic", "metal", "shade", "wash", "primer", "contrast", "ink", 
     # the piece that names the most wins, so a shop's shorthand doesn't become the name
     ("MW: Wash: Light Grey (35 ml.)", ["Vallejo"], None, "Light Grey"),
     ("(76515) - Av Model Wash 35ml - Light Grey Wash", ["Vallejo"], "76.515", "Light Grey"),
+    # the range is named with the kinds, the colour is the piece without them
+    ("77104 18 ml True Metallic Metal Light Paint, Ancient Copper",
+     ["Vallejo"], "77.104", "Ancient Copper"),
 ])
 def test_clean_title(title, names, code, expected):
     assert lookup.clean_title(title, names, code, TAG_WORDS) == expected
@@ -268,6 +271,19 @@ def test_a_bare_five_digit_number_is_a_code_only_for_vallejo(client, monkeypatch
     s = client.get("/api/lookup/upcitemdb", params={"barcode": "0850025932011"}).json()["suggestion"]
     assert s["code"] is None and s["manufacturer"] is None
     assert s["new_manufacturer"] == "Monument Hobbies"
+
+
+def test_entities_are_decoded_and_the_colour_beats_the_range(client, monkeypatch):
+    """A shop writes the comma as "&#44;": undecoded it neither shows nor separates."""
+    _answer(monkeypatch, data={"items": [{
+        "title": "VJP77104 18 ml True Metallic Metal Light Paint&#44; Ancient Copper",
+        "brand": "Vallejo"}]})
+    d = client.get("/api/lookup/upcitemdb", params={"barcode": "8429551771047"}).json()
+    tags = {t["id"]: t["name"] for t in client.get("/api/tags").json()}
+    assert "&#44;" not in d["item"]["title"] and "Paint, Ancient Copper" in d["item"]["title"]
+    s = d["suggestion"]
+    assert (s["name"], s["code"]) == ("Ancient Copper", "77.104")
+    assert [tags[i] for i in s["tag_ids"]] == ["Металлик"]
 
 
 def test_several_listings_the_one_with_a_name_wins(client, monkeypatch):

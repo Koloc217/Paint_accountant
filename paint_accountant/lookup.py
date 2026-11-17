@@ -15,6 +15,7 @@ Airbrush Modelling Hobby") and a brand; `suggest` turns them into fields of our 
 from __future__ import annotations
 
 import base64
+import html
 import http.client
 import ipaddress
 import json
@@ -288,7 +289,11 @@ def _is_word(w: str) -> bool:
 
 
 def _text(value: Any, limit: int = 300) -> str:
-    return " ".join(str(value).split())[:limit] if isinstance(value, (str, int, float)) else ""
+    """A field of the answer as text. Shops write "Paint&#44; Ancient Copper", and an
+    undecoded comma is neither shown nor split on as the comma it is."""
+    if not isinstance(value, (str, int, float)):
+        return ""
+    return " ".join(html.unescape(str(value)).split())[:limit]
 
 
 def _essentials(item: dict) -> dict[str, Any]:
@@ -349,7 +354,7 @@ def clean_title(title: str, maker_names: list[str], code: str | None, tag_words:
     text = re.sub(r"\b\d+([.,]\d+)?\s?(g|gr|oz|cc|mm|cm)\b", " ", text, flags=re.I)
 
     filler = rec.STOPWORDS | SHOP_WORDS
-    best, found, fallback = "", 0, ""
+    best, found, fallback = "", 0, ""  # `found`: how much of the best piece reads as a colour
     for piece in SEPARATORS.split(text):
         # drop filler everywhere, kind-of-paint words only at the edges
         kept = [w for w in piece.replace("#", " ").split() if _is_word(w) and rec.norm(w) not in filler]
@@ -360,8 +365,10 @@ def clean_title(title: str, maker_names: list[str], code: str | None, tag_words:
             core.pop(0)
         while core and rec.norm(core[-1]) in tag_words:
             core.pop()
-        # the piece that names the most — "MW: Wash: Light Grey" is not called "MW"
-        colour = len([w for w in core if rec.norm(w) not in tag_words])
+        # the piece that names a colour rather than a range: "MW: Wash: Light Grey" is not
+        # called "MW", and "True Metallic Metal Light Paint, Ancient Copper" is a copper
+        kinds_here = len([w for w in core if rec.norm(w) in tag_words])
+        colour = len(core) - 2 * kinds_here
         if colour > found:
             best, found = rec.clean_name(" ".join(core))[:200], colour
         fallback = fallback or rec.clean_name(" ".join(core or kept))[:200]
