@@ -311,6 +311,42 @@ def test_a_letter_and_digits_are_a_code_only_for_mr_hobby(client, monkeypatch):
     assert s["code"] is None and s["manufacturer"] is None
 
 
+# AK's own title sells the whole General Series ("236 colour singles"), and the shop's
+# title has the pot: its code, its colour, and the shop's own spelling of it
+BRITISH_KHAKI = {
+    "ean": "8435568303607",
+    "title": "AK Interactive: GENERAL Series Paints ? Acrylic Color Model Paint - 17ml Singles",
+    "brand": "AK Interactive",
+    "offers": [{"title": "Ak Interactive Ak11127 British Kkaki [3rd Gen] (17ml Bottle) Acrylic Paint Brown"}],
+}
+
+
+def test_ak_pot_from_the_shops_title(client, monkeypatch):
+    _answer(monkeypatch, data={"items": [BRITISH_KHAKI]})
+    s = client.get("/api/lookup/upcitemdb", params={"barcode": "8435568303607"}).json()["suggestion"]
+    assert (s["name"], s["code"]) == ("British Kkaki", "AK11127")  # the shop's typo is theirs to keep
+    assert s["manufacturer"]["name"] == "AK" and s["range_only"] is False
+
+
+def test_a_listing_of_a_whole_series_names_nothing(client, monkeypatch):
+    """"GENERAL Series … Singles" is a shelf: the words for one say so even with no kinds named."""
+    _answer(monkeypatch, data={"items": [{k: v for k, v in BRITISH_KHAKI.items() if k != "offers"}]})
+    s = client.get("/api/lookup/upcitemdb", params={"barcode": "8435568303607"}).json()["suggestion"]
+    assert s["name"] is None and s["range_only"] is True
+    assert s["manufacturer"]["name"] == "AK"
+
+
+@pytest.mark.parametrize("title, name, code", [
+    ("AK Interactive Real Colors RC004 Olive Drab 10ml", "Olive Drab", "RC004"),
+    ("Real Colors RC-026 Dark Green 10ml", "Dark Green", "RC026"),
+    ("AK Interactive Xtreme Metal AK479 Aluminium 30ml", "Aluminium", "AK479"),
+])
+def test_ak_lines_and_their_codes(client, monkeypatch, title, name, code):
+    _answer(monkeypatch, data={"items": [{"title": title, "brand": "AK Interactive"}]})
+    s = client.get("/api/lookup/upcitemdb", params={"barcode": "8435568303607"}).json()["suggestion"]
+    assert (s["name"], s["code"], s["manufacturer"]["name"]) == (name, code, "AK")
+
+
 def test_several_listings_the_one_with_a_name_wins(client, monkeypatch):
     nothing = {"title": "Citadel Base Paint Pot - Games Workshop - All Colors!", "brand": "Citadel Miniatures"}
     _answer(monkeypatch, data={"items": [nothing, MEPHISTON]})

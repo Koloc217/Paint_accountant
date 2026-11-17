@@ -215,6 +215,10 @@ ALIASES = {
     "ak interactive": "AK",
     "akinteractive": "AK",
     "kimera kolors": "Kimera",
+    # AK prints the line, not the company: "REAL COLORS", "XTREME METAL"
+    "real colors": "AK",
+    "real color": "AK",
+    "xtreme metal": "AK",
     "gsw": "Green Stuff World",
     "green stuf world": "Green Stuff World",
     "greenstuffworld": "Green Stuff World",
@@ -254,6 +258,8 @@ CODE_PATTERNS: list[tuple[str | None, re.Pattern, Any]] = [
     # Vallejo: 70.xxx Model Color, 71.xxx Model Air, 72.xxx Game Color, 77.xxx Metal Color, 26/28/62/69 etc.
     ("Vallejo", re.compile(r"\b([2-7]\d)\s?[.,·]\s?(\d{3})\b"), lambda m: f"{m[1]}.{m[2]}"),
     ("AK", re.compile(r"\bAK\s?-?\s?(\d{3,5})\b", re.I), lambda m: f"AK{m[1]}"),
+    # AK Real Colors: "RC004". Glued or hyphenated only — "RC 004" is too loose to be a code
+    ("AK", re.compile(r"\bRC-?(\d{3,4})\b", re.I), lambda m: f"RC{m[1]}"),
     ("Army Painter", re.compile(r"\b(WP|CP|GM)\s?(\d{4})\b", re.I), lambda m: f"{m[1].upper()}{m[2]}"),
     ("Tamiya", re.compile(r"\b(XF|X|LP|TS|AS)\s?-\s?(\d{1,3})\b", re.I), lambda m: f"{m[1].upper()}-{m[2]}"),
     # Tamiya prints the catalogue number as "Item 87131" (also "Item No. 81731")

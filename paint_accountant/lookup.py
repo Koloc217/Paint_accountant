@@ -260,11 +260,17 @@ SHOP_WORDS = {
     "warpaints", "3rd", "gen", "generation",  # product lines printed before the name
     "warhammer", "40k", "wargaming", "stock", "all", "official", "genuine", "new",
     "brushes", "brushs",  # a title that sells brushes alongside the paints
+    # "GENERAL Series Paints … 17ml Singles" — a shelf of 236 pots, not a colour's name
+    "series", "singles", "set", "sets", "collection", "assortment", "bundle", "range",
 }
+
+# a listing for a whole range rather than for one pot. Looked for in the title as it came,
+# so a word that is dropped as shop noise can still say what the listing is
+RANGE_HINTS = {"series", "singles", "range", "set", "sets", "collection", "assortment", "bundle"}
 
 # ranges that aren't tags of ours ("Citadel Dry", "Army Painter Spray"): not a colour's name
 # either, so they are trimmed off the edges of one just like the kinds we do tag
-EXTRA_KINDS = {"dry", "spray", "sprays", "aqueous"}
+EXTRA_KINDS = {"dry", "spray", "sprays", "aqueous", "general"}
 
 # "...Pot Paint For Base": the pot is a Technical one, Base is just what it goes over
 CROSS_REFERENCE = re.compile(r"\b(?:for|over|under|with|onto|on)\s+(\w+)", re.I)
@@ -444,10 +450,11 @@ def suggest(conn: sqlite3.Connection, barcode: str, item: dict) -> dict[str, Any
         code = find_code(title)
         name = clean_title(title, names, code, kinds)
         real = {rec.norm(w) for w in name.split()} - kinds
-        said = {k for k in kinds if f" {k} " in f" {rec.norm(title)} "}
-        # "Base, Layer, Contrast & Shade" is the whole range in one listing: it names no
-        # colour, and its kinds are not this pot's tags
-        a_range = not real and len(said) > 1
+        words = set(rec.norm(title).split())
+        said = kinds & words
+        # a listing of the whole range names no colour of its own — "Base, Layer, Contrast
+        # & Shade", "GENERAL Series … Singles" — and its kinds are not this pot's tags
+        a_range = not real and (len(said) > 1 or bool(RANGE_HINTS & words))
         # a kind this pot goes over is not a kind this pot is
         for_other = {rec.norm(m.group(1)) for m in CROSS_REFERENCE.finditer(title)} & kinds
         tagged = rec._tag_ids(" ".join(said - for_other), keywords)
