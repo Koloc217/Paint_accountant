@@ -161,10 +161,52 @@ export async function viewSettings(mount) {
       }),
       h('div', { class: 'hint' }, t('Кнопка 🔎 у штрихкода спрашивает UPCitemdb, что это за товар, и заполняет форму краски. Отправляется только штрихкод и только по нажатию. Бесплатно: 100 запросов в день.')),
       h('div', { class: 'hint' },
-        look.via === 'proxy' ? t('Запросы идут через прокси {0}.', look.route)
-          : look.via === 'interface' ? t('Запросы идут через интерфейс {0}.', look.route)
-            : t('Запросы идут напрямую, без прокси.'),
-        ' ', t('Прокси или сетевой интерфейс задаются в config.ini, раздел [lookup].'))));
+        look.via === 'proxy' ? t('Сейчас запросы идут через прокси {0}.', look.route)
+          : look.via === 'interface' ? t('Сейчас запросы идут через интерфейс {0}.', look.route)
+            : t('Сейчас запросы идут напрямую, без прокси.'))),
+    routeFields(look));
+
+  /** Proxy or interface for the lookups — needed only where UPCitemdb is unreachable directly. */
+  function routeFields(look) {
+    const proxy = h('input', { class: 'input', id: 's-proxy', value: look.proxy || '',
+      placeholder: 'socks5h://192.168.1.60:1080', autocapitalize: 'none', spellcheck: 'false' });
+    const iface = h('input', { class: 'input', id: 's-iface', value: look.interface || '',
+      placeholder: 'awg0', autocapitalize: 'none', spellcheck: 'false' });
+    const said = h('div', { class: 'hint' });
+    const body = () => ({ proxy: proxy.value.trim(), interface: iface.value.trim() });
+    const problem = err => (err instanceof ApiError && err.detail ? err.detail.message : err.message);
+
+    const check = h('button', { type: 'button', class: 'btn', onclick: async () => {
+      check.disabled = true;
+      said.textContent = t('Проверяю связь…');
+      try {
+        const r = await api('POST', '/settings/lookup/check', body());
+        said.textContent = t('Связь есть: {0}', r.route);
+      } catch (err) { said.textContent = t('Не достучался: {0}', problem(err)); }
+      check.disabled = false;
+    } }, t('Проверить связь'));
+
+    const save = h('button', { type: 'button', class: 'btn primary', onclick: async () => {
+      try {
+        const r = await api('PUT', '/settings/lookup', body());
+        if (r.overridden_by_env.length) {
+          toast(t('Сохранено, но сейчас действуют переменные окружения: {0}', r.overridden_by_env.join(', ')), 'warn');
+        } else {
+          toast(t('Сохранено'), 'ok');
+        }
+        render();
+      } catch (err) { toast(t('Не получилось сохранить: {0}', problem(err)), 'err'); }
+    } }, t('Сохранить'));
+
+    return h('details', { class: 'panel form route-box', open: Boolean(look.proxy || look.interface) },
+      h('summary', null, t('Прокси или сетевой интерфейс')),
+      h('div', { class: 'hint' }, t('Нужно только если UPCitemdb недоступен напрямую. Пусто — напрямую или через системные переменные окружения.')),
+      h('div', { class: 'field' }, h('label', { for: 's-proxy' }, t('Прокси')), proxy,
+        h('div', { class: 'hint' }, t('socks5://, socks5h:// или http://, можно с логином и паролем.'))),
+      h('div', { class: 'field' }, h('label', { for: 's-iface' }, t('Сетевой интерфейс')), iface,
+        h('div', { class: 'hint' }, t('Имя интерфейса (только Linux) или его IP-адрес. Не используется, если задан прокси.'))),
+      h('div', { class: 'row' }, save, check), said);
+  }
 
   let signIn;
   if (!state.enabled) {

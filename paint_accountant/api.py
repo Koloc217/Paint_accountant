@@ -21,6 +21,7 @@ from .schemas import (
     BulkResult,
     LanguageIn,
     LookupSettingIn,
+    RouteIn,
     Manufacturer,
     ManufacturerIn,
     MergeIn,
@@ -93,7 +94,9 @@ def info(request: Request) -> dict:
     how = lookup.route(settings)
     return {"version": __version__, "lan_url": lan_url(settings.port),
             "language": request.app.state.language,
-            "lookup": {"upcitemdb": settings.lookup_enabled, "via": how.kind, "route": how.label}}
+            "lookup": {"upcitemdb": settings.lookup_enabled, "via": how.kind, "route": how.label,
+                       "proxy": settings.lookup_proxy or "", "interface": settings.lookup_interface or "",
+                       "from_env": how.from_env}}
 
 
 @router.put("/settings/language", tags=["system"])
@@ -111,15 +114,56 @@ def set_language(body: LanguageIn, request: Request) -> dict:
 
 @router.put("/settings/lookup", tags=["system"])
 def set_lookup(body: LookupSettingIn, request: Request) -> dict:
-    """Online barcode lookup on or off, for every device; saved into config.ini ([lookup] upcitemdb)."""
+    """Online barcode lookup for every device, saved into config.ini, section [lookup].
+
+    Only what is given changes; an empty proxy or interface clears that one. A proxy is only
+    accepted if it can be parsed — a typo in it would otherwise leave the lookup unreachable
+    with nothing to say why."""
     settings = request.app.state.settings
+    if body.proxy:
+        try:
+            lookup.parse_proxy(body.proxy)
+        except lookup.LookupFailed as exc:
+            raise HTTPException(422, {"code": exc.code, "message": str(exc)})
     try:
-        save_lookup(settings.config_file, body.enabled)
+        save_lookup(settings.config_file, body.enabled, body.proxy, body.interface)
     except OSError as exc:
         raise HTTPException(500, f"can't write {settings.config_file}: {exc}")
-    request.app.state.settings = replace(settings, lookup_enabled=body.enabled)
-    return {"upcitemdb": body.enabled, "config_file": str(settings.config_file),
-            "overridden_by_env": bool(os.environ.get("PAINT_LOOKUP"))}
+    changed = {}
+    if body.enabled is not None:
+        changed["lookup_enabled"] = body.enabled
+    if body.proxy is not None:
+        changed["lookup_proxy"] = body.proxy.strip() or None
+    if body.interface is not None:
+        changed["lookup_interface"] = body.interface.strip() or None
+    settings = replace(settings, **changed)
+    request.app.state.settings = settings
+    how = lookup.route(settings)
+    overridden = sorted(name for name, var in (("upcitemdb", "PAINT_LOOKUP"), ("proxy", "PAINT_LOOKUP_PROXY"),
+                                               ("interface", "PAINT_LOOKUP_INTERFACE"))
+                        if os.environ.get(var))
+    return {"upcitemdb": settings.lookup_enabled, "proxy": settings.lookup_proxy,
+            "interface": settings.lookup_interface, "via": how.kind, "route": how.label,
+            "config_file": str(settings.config_file), "overridden_by_env": overridden}
+
+
+@router.post("/settings/lookup/check", tags=["system"])
+async def check_lookup(body: RouteIn, request: Request) -> dict:
+    """Try to reach UPCitemdb — by the route given, or by the saved one.
+
+    Opens the connection and closes it without asking anything, so it costs none of the
+    day's hundred requests. Answers {"ok": true} or 502 with what went wrong."""
+    settings = request.app.state.settings
+    if body.proxy or body.interface:
+        how = lookup.Route(proxy=(body.proxy or "").strip() or None,
+                           interface=(body.interface or "").strip() or None)
+    else:
+        how = lookup.route(settings)
+    try:
+        await run_in_threadpool(lookup.check, how)
+    except lookup.LookupFailed as exc:
+        raise HTTPException(_LOOKUP_STATUS.get(exc.code, 502), {"code": exc.code, "message": str(exc)})
+    return {"ok": True, "via": how.kind, "route": how.label}
 
 
 _LOOKUP_STATUS = {

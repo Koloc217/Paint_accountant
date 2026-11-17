@@ -628,7 +628,9 @@ def test_bad_barcode_never_leaves(client, monkeypatch):
 
 def test_setting_turns_it_off_and_is_saved(client, monkeypatch):
     calls = _answer(monkeypatch, data={"items": [QUICKSILVER]})
-    assert client.get("/api/info").json()["lookup"] == {"upcitemdb": True, "via": "direct", "route": "no proxy"}
+    assert client.get("/api/info").json()["lookup"] == {
+        "upcitemdb": True, "via": "direct", "route": "no proxy",
+        "proxy": "", "interface": "", "from_env": False}
     r = client.put("/api/settings/lookup", json={"enabled": False})
     assert r.status_code == 200 and r.json()["upcitemdb"] is False
     assert client.get("/api/info").json()["lookup"]["upcitemdb"] is False
@@ -646,6 +648,61 @@ def test_setting_turns_it_off_and_is_saved(client, monkeypatch):
 
 
 # ---------------- settings and the route ----------------
+
+def test_the_route_can_be_set_and_tried_from_the_app(client, monkeypatch, tmp_path):
+    """Set from Settings rather than by hand in config.ini — and tried without spending a request."""
+    tried: list = []
+    monkeypatch.setattr(lookup, "check", lambda how: tried.append(how))
+
+    r = client.put("/api/settings/lookup", json={"proxy": "socks5h://me:secret@192.168.1.60:1080"})
+    assert r.status_code == 200 and r.json()["route"] == "socks5h://192.168.1.60:1080"
+    assert r.json()["via"] == "proxy" and r.json()["overridden_by_env"] == []
+    assert client.get("/api/info").json()["lookup"]["proxy"] == "socks5h://me:secret@192.168.1.60:1080"
+
+    ini = client.app.state.settings.config_file
+    assert load_settings(config_file=ini).lookup_proxy == "socks5h://me:secret@192.168.1.60:1080"
+    assert "port = 8642" in ini.read_text(encoding="utf-8")  # the rest of the file is left alone
+
+    # a proxy that can't be parsed is refused rather than saved
+    bad = client.put("/api/settings/lookup", json={"proxy": "ftp://nowhere"})
+    assert bad.status_code == 422 and bad.json()["detail"]["code"] == "lookup_config"
+    assert load_settings(config_file=ini).lookup_proxy == "socks5h://me:secret@192.168.1.60:1080"
+
+    # the switch alone leaves the route alone, and an empty proxy clears it
+    client.put("/api/settings/lookup", json={"enabled": False})
+    assert load_settings(config_file=ini).lookup_proxy == "socks5h://me:secret@192.168.1.60:1080"
+    r = client.put("/api/settings/lookup", json={"proxy": "", "interface": "awg0"})
+    assert r.json()["via"] == "interface" and r.json()["route"] == "awg0"
+    assert load_settings(config_file=ini).lookup_proxy is None
+
+    # checking: the typed route if one is given, otherwise the saved one
+    assert client.post("/api/settings/lookup/check", json={"proxy": "http://10.0.0.9:3128"}).json() == {
+        "ok": True, "via": "proxy", "route": "http://10.0.0.9:3128"}
+    assert client.post("/api/settings/lookup/check", json={}).json()["route"] == "awg0"
+    assert [h.proxy or h.interface for h in tried] == ["http://10.0.0.9:3128", "awg0"]
+
+    def refused(how):
+        raise lookup.LookupFailed("lookup_unreachable", f"{how.label}: Connection refused")
+
+    monkeypatch.setattr(lookup, "check", refused)
+    r = client.post("/api/settings/lookup/check", json={"proxy": "socks5://127.0.0.1:9"})
+    assert r.status_code == 502 and "Connection refused" in r.json()["detail"]["message"]
+
+
+def test_checking_the_route_spends_no_request(client, monkeypatch):
+    """It opens the connection and closes it, without asking UPCitemdb anything."""
+    asked = []
+    monkeypatch.setattr(lookup, "fetch", lambda *a: asked.append(a))
+    opened = []
+
+    def tunnel(host, port, how):
+        opened.append((host, port))
+        raise OSError("no network here")
+
+    monkeypatch.setattr(lookup, "open_tunnel", tunnel)
+    r = client.post("/api/settings/lookup/check", json={})
+    assert r.status_code == 502 and opened == [("api.upcitemdb.com", 443)] and asked == []
+
 
 def test_config_and_route(monkeypatch, tmp_path):
     ini = tmp_path / "config.ini"

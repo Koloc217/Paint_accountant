@@ -152,9 +152,18 @@ def save_language(path: Path, language: str) -> None:
                 "Interface language: auto (the browser's), ru or en. Also set in the app's Settings.")
 
 
-def save_lookup(path: Path, enabled: bool) -> None:
-    save_option(path, "lookup", "upcitemdb", "on" if enabled else "off",
-                "Online barcode lookup at UPCitemdb: on or off. Also set in the app's Settings.")
+def save_lookup(path: Path, enabled: bool | None = None, proxy: str | None = None,
+                interface: str | None = None) -> None:
+    """Write the given parts of [lookup]; the rest of the file, comments and all, is kept."""
+    if enabled is not None:
+        save_option(path, "lookup", "upcitemdb", "on" if enabled else "off",
+                    "Online barcode lookup at UPCitemdb: on or off. Also set in the app's Settings.")
+    if proxy is not None:
+        save_option(path, "lookup", "proxy", proxy.strip(),
+                    "Send lookups through a proxy: socks5://host:port, socks5h://…, http://host:port.")
+    if interface is not None:
+        save_option(path, "lookup", "interface", interface.strip(),
+                    "Or through a network interface, e.g. a VPN's awg0. Ignored when proxy is set.")
 
 
 def ensure_config_file(path: Path = CONFIG_FILE, example: Path = CONFIG_EXAMPLE) -> bool:

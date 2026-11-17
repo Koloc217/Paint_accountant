@@ -193,19 +193,30 @@ def _http_connect(sock: socket.socket, host: str, port: int, user: str | None, p
         raise OSError(f"the proxy answered: {status}")
 
 
-def open_tunnel(host: str, port: int, how: Route) -> socket.socket:
-    """A plain TCP connection to host:port — direct, through an interface or through a proxy."""
-    if not how.proxy:
-        return _connect(host, port, how.interface)
-    url = urlsplit(how.proxy if "://" in how.proxy else "http://" + how.proxy)
+def parse_proxy(proxy: str) -> tuple[str, str, int, str | None, str | None]:
+    """A proxy address as its parts, or LookupFailed saying what is wrong with it."""
+    url = urlsplit(proxy if "://" in proxy else "http://" + proxy)
     scheme = url.scheme.lower()
     if scheme not in ("http", "socks5", "socks5h"):
-        raise LookupFailed("lookup_config", f"proxy type {scheme}:// isn't supported — use socks5://, socks5h:// or http://")
+        raise LookupFailed("lookup_config",
+                           f"proxy type {scheme}:// isn't supported — use socks5://, socks5h:// or http://")
+    try:
+        port = url.port or (8080 if scheme == "http" else 1080)
+    except ValueError:
+        raise LookupFailed("lookup_config", "the proxy's port is not a number")
     if not url.hostname:
         raise LookupFailed("lookup_config", "the proxy address has no host")
     user = unquote(url.username) if url.username is not None else None
     password = unquote(url.password) if url.password is not None else None
-    sock = _connect(url.hostname, url.port or (8080 if scheme == "http" else 1080), how.interface)
+    return scheme, url.hostname, port, user, password
+
+
+def open_tunnel(host: str, port: int, how: Route) -> socket.socket:
+    """A plain TCP connection to host:port — direct, through an interface or through a proxy."""
+    if not how.proxy:
+        return _connect(host, port, how.interface)
+    scheme, proxy_host, proxy_port, user, password = parse_proxy(how.proxy)
+    sock = _connect(proxy_host, proxy_port, how.interface)
     try:
         if scheme == "http":
             _http_connect(sock, host, port, user, password)
@@ -226,6 +237,23 @@ class _Connection(http.client.HTTPSConnection):
     def connect(self) -> None:
         sock = open_tunnel(self.host, self.port, self._how)
         self.sock = self._tls.wrap_socket(sock, server_hostname=self.host)
+
+
+def check(how: Route) -> None:
+    """Can UPCitemdb be reached this way at all? Costs no request of the day's hundred:
+    the connection is opened and closed again without asking anything."""
+    try:
+        sock = open_tunnel(API_HOST, 443, how)
+    except LookupFailed:
+        raise
+    except (OSError, http.client.HTTPException) as exc:
+        raise LookupFailed("lookup_unreachable", f"{how.label}: {exc}")
+    try:
+        ssl.create_default_context().wrap_socket(sock, server_hostname=API_HOST)
+    except (OSError, ssl.SSLError) as exc:
+        raise LookupFailed("lookup_unreachable", f"{how.label}: {exc}")
+    finally:
+        sock.close()
 
 
 def fetch(barcode: str, how: Route) -> tuple[int, dict[str, str], Any]:

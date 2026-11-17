@@ -315,4 +315,15 @@ class LanguageIn(BaseModel):
 
 
 class LookupSettingIn(BaseModel):
-    enabled: bool = Field(..., description="online barcode lookup (UPCitemdb) on or off")
+    """Only the parts given are changed; an empty string clears a route."""
+
+    enabled: bool | None = Field(None, description="online barcode lookup (UPCitemdb) on or off")
+    proxy: str | None = Field(None, max_length=300, description="socks5://host:port, socks5h://…, http://…")
+    interface: str | None = Field(None, max_length=100, description="network interface or local address")
+
+
+class RouteIn(BaseModel):
+    """A route to try. Left out, the saved one is checked."""
+
+    proxy: str | None = Field(None, max_length=300)
+    interface: str | None = Field(None, max_length=100)

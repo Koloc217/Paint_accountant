@@ -77,7 +77,7 @@ On first start `config.ini` is created from `config.example.ini`; edit it to cha
 
 The **🔎** button next to the barcode field (and **🔎 Find at UPCitemdb** after a new barcode is scanned) asks [UPCitemdb](https://www.upcitemdb.com/) what the product is and fills in the empty fields: the name (cleaned from the shop title — brand, volume, shop articles and words like "Acrylic Paint … Modelling Hobby" are dropped), manufacturer, code and tags. One barcode usually comes back under several titles, the shops' own among them, and the one that actually names a colour is used; a listing for a whole range ("Citadel Paint Pot - Base, Layer, Contrast & Shade") fills in nothing but the manufacturer, and says so. A brand that isn't in your list is offered as a new manufacturer. Always check the result: shop titles can be inexact, and many hobby paints aren't in the database at all.
 
-Only the barcode is sent, only when you press the button, and from the computer running the app — not from the phone. The free API needs no key: 100 lookups a day and 6 a minute per IP address; a repeated lookup of the same barcode within a day is answered from memory. Turn it off in ⚙ Settings or with `upcitemdb = off`. If the site isn't reachable from your network, set a proxy or a VPN interface in `[lookup]` (see the table above); nothing has to be installed for that.
+Only the barcode is sent, only when you press the button, and from the computer running the app — not from the phone. The free API needs no key: 100 lookups a day and 6 a minute per IP address; a repeated lookup of the same barcode within a day is answered from memory. Turn it off in ⚙ Settings or with `upcitemdb = off`. If the site isn't reachable from your network, set a proxy or a VPN interface — in ⚙ Settings under **Proxy or network interface**, or in `[lookup]` (see the table above); nothing has to be installed for either. **Check the connection** there tries the route without spending a request of the day's hundred: it opens the connection to UPCitemdb and closes it again.
 
 ### Adding paints by photo (optional)
 
@@ -146,7 +146,8 @@ No build step and no external libraries — plain HTML, CSS and JavaScript in `p
 | GET | `/api/recognize` | whether photo recognition is installed |
 | POST | `/api/recognize` | send a photo as the body (`Content-Type: image/jpeg`); returns label text, barcodes, form suggestions and matching paints; `?barcode_only=true` skips text (for live camera frames) |
 | PUT | `/api/settings/language` | `{"language": "auto" \| "ru" \| "en"}` — saved into `config.ini` |
-| PUT | `/api/settings/lookup` | `{"enabled": true \| false}` — online barcode lookup on or off, saved into `config.ini` |
+| PUT | `/api/settings/lookup` | `{"enabled": …, "proxy": …, "interface": …}` — only what is given changes, an empty proxy or interface clears it; saved into `config.ini` |
+| POST | `/api/settings/lookup/check` | `{"proxy": …, "interface": …}` or `{}` for the saved route: opens the connection to UPCitemdb and closes it, so it costs no request |
 | GET | `/api/lookup/upcitemdb/raw?barcode=…` | what UPCitemdb answered for that barcode (or the newest answer), exactly as it came; no request is made, the last few answers are kept until the app is restarted. **What UPCitemdb answered** under the lookup result shows it |
 | GET | `/api/lookup/upcitemdb?barcode=…` | ask UPCitemdb about a barcode: `found`, the raw `item` (title, brand…) and a `suggestion` for the form (name, manufacturer or `new_manufacturer`, code, tag ids), `remaining` requests today; errors carry `detail.code`: `lookup_disabled` (409), `lookup_limit` / `lookup_too_fast` (429), `lookup_unreachable` (502) |
 | GET | `/api/qr.svg?data=…` | QR code as SVG (for storage labels) |
