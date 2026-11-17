@@ -234,6 +234,15 @@ ALIASES = {
     "metal color": "Vallejo",
     "panzer aces": "Vallejo",
     "premium color": "Vallejo",
+    "gsi creos": "Mr. Hobby",
+    "gunze sangyo": "Mr. Hobby",
+    # Mr. Hobby prints the line, not the company: "Mr.COLOR", "AQUEOUS HOBBY COLOR"
+    "mr color": "Mr. Hobby",
+    "mr colour": "Mr. Hobby",
+    "mr metal color": "Mr. Hobby",
+    "mr surfacer": "Mr. Hobby",
+    "mr weathering color": "Mr. Hobby",
+    "aqueous hobby color": "Mr. Hobby",
     "scale 75": "Scale75",
     "scalecolor": "Scale75",
     "fantasy games": "Scale75",  # "Fantasy & Games" line; its logo font is rarely read right
@@ -253,6 +262,10 @@ CODE_PATTERNS: list[tuple[str | None, re.Pattern, Any]] = [
     # Scale75: Fantasy & Games "SFG-38", Scalecolor "SC-12"; OCR may drop the dash of SFG
     ("Scale75", re.compile(r"\b(SFG)\s?-?\s?(\d{2,3})\b", re.I), lambda m: f"{m[1].upper()}-{m[2]}"),
     ("Scale75", re.compile(r"\b(SC)\s?-\s?(\d{2,3})\b", re.I), lambda m: f"{m[1].upper()}-{m[2]}"),
+    # Mr. Hobby: "C137" Mr.Color, "H12" Aqueous, "MC211" Metal Color, "GX2", "WC01", "UG05".
+    # Letters glued to the number, and never telling on their own: "C12" alone proves nothing,
+    # so it counts only once the paint is known to be Mr. Hobby's.
+    ("Mr. Hobby", re.compile(r"\b(GX|SM|MC|WC|UG|C|H)(\d{1,3})\b"), lambda m: f"{m[1].upper()}{m[2]}"),
     # Green Stuff World: "1750 - PAINT REVITALIZER"
     ("Green Stuff World", re.compile(r"\b(\d{4,5})\s*[-–]\s*[A-Za-z]"), lambda m: m[1]),
 ]

@@ -10,6 +10,7 @@ one script) and the starter data; each entry in MIGRATIONS then moves it up by o
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
 
 from .repository import register_functions
@@ -126,7 +127,8 @@ BASELINE = f"""
 
 # ---- what a new database starts with (all of it can be renamed or deleted in the app)
 
-STARTER_MANUFACTURERS = ["AK", "Citadel", "Green Stuff World", "Kaleido", "Kimera", "Tamiya", "Vallejo", "Scale75"]
+STARTER_MANUFACTURERS = ["AK", "Citadel", "Green Stuff World", "Kaleido", "Kimera", "Mr. Hobby",
+                         "Tamiya", "Vallejo", "Scale75"]
 
 # (Russian name, English name, plaque color, words on a label that suggest the tag)
 STARTER_TAGS: list[tuple[str, str, str, list[str]]] = [
@@ -142,6 +144,8 @@ STARTER_TAGS: list[tuple[str, str, str, list[str]]] = [
     ("Чернила", "Ink", "#3949ab", ["ink", "inks", "dipping", "dip", "quickshade"]),
     ("Лак", "Varnish", "#fdd835", ["varnish"]),
     ("Для аэрографа", "Airbrush", "#ef6c00", ["air"]),
+    # thinned and cleaned with alcohol or a lacquer thinner, not with water
+    ("Спиртовая", "Alcohol-based", "#7cb342", ["alcohol", "lacquer"]),
     # thinners, mediums, retarders, cleaners, putty, paint revitalizers
     ("Техническая", "Technical", "#607d8b",
      ["medium", "thinner", "thinners", "retarder", "flow", "improver", "diluent", "cleaner", "cleaners",
@@ -151,8 +155,36 @@ STARTER_TAGS: list[tuple[str, str, str, list[str]]] = [
 # the one storage of a new database: "at hand" and the default for new pots
 STARTER_STORAGE = {"ru": "Под рукой", "en": "At hand"}
 
-# Changes after the baseline; entry 0 takes the schema to BASELINE_VERSION + 1.
-MIGRATIONS: list[str] = [
+def _add_mr_hobby_and_the_alcohol_tag(conn: sqlite3.Connection) -> None:
+    """Give a database made before these were starter data a chance to catch up.
+
+    Both only if they are missing: a user who added Mr. Hobby himself, or who already
+    sorted his alcohol paints under a tag of his own, keeps exactly what he has — and
+    running this twice changes nothing, since the second run finds them there.
+    """
+    conn.execute("""INSERT INTO manufacturer (name) SELECT 'Mr. Hobby'
+                    WHERE NOT EXISTS (SELECT 1 FROM manufacturer WHERE py_lower(name) = py_lower('Mr. Hobby'))""")
+
+    ru, en, color, keywords = STARTER_TAGS[-2]
+    assert (ru, en) == ("Спиртовая", "Alcohol-based")  # this migration is about that one tag
+    taken = conn.execute(
+        """SELECT EXISTS (SELECT 1 FROM tag_keyword WHERE keyword = ?)
+                  OR EXISTS (SELECT 1 FROM tag_name WHERE lang = 'ru' AND py_lower(name) = py_lower(?))
+                  OR EXISTS (SELECT 1 FROM tag_name WHERE lang = 'en' AND py_lower(name) = py_lower(?))""",
+        (keywords[0], ru, en)).fetchone()[0]
+    if taken:
+        return
+    tag_id = conn.execute("INSERT INTO tag (color) VALUES (?)", (color,)).lastrowid
+    conn.executemany("INSERT INTO tag_name (tag_id, lang, name) VALUES (?, ?, ?)",
+                     [(tag_id, "ru", ru), (tag_id, "en", en)])
+    # a keyword already pointing at another tag stays with it
+    conn.executemany("INSERT OR IGNORE INTO tag_keyword (keyword, tag_id) VALUES (?, ?)",
+                     [(kw, tag_id) for kw in keywords])
+
+
+# Changes after the baseline, as SQL or as a function taking the open connection; each runs
+# in its own transaction. Entry 0 takes the schema to BASELINE_VERSION + 1.
+MIGRATIONS: list[str | Callable[[sqlite3.Connection], None]] = [
     # 16 — names saved with spaces around them (" Nuln Oil"), doubled spaces or invisible
     #      characters are tidied, as new ones are on saving. A name that would then repeat
     #      another one is left as it is (merge such paints by hand).
@@ -187,6 +219,16 @@ MIGRATIONS: list[str] = [
     UPDATE storage SET nfc_tag = nullif(py_clean(nfc_tag), '')
         WHERE nfc_tag IS NOT NULL AND nfc_tag != py_clean(nfc_tag);
     """,
+    # 17 — Mr. Hobby joins the manufacturers a new database starts with, and paints thinned
+    #      with alcohol or a lacquer thinner get a tag of their own. Both only if missing:
+    #      a database where the user already added them keeps what he has.
+    """
+    INSERT INTO manufacturer (name) SELECT 'Mr. Hobby'
+        WHERE NOT EXISTS (SELECT 1 FROM manufacturer WHERE py_lower(name) = py_lower('Mr. Hobby'));
+    """,
+    # 17 — Mr. Hobby among the manufacturers a new database starts with, and a tag for the
+    #      paints thinned with alcohol or a lacquer thinner.
+    _add_mr_hobby_and_the_alcohol_tag,
 ]
 
 SCHEMA_VERSION = BASELINE_VERSION + len(MIGRATIONS)
@@ -258,7 +300,13 @@ def init_db(db_path: Path) -> None:
         conn.execute("PRAGMA foreign_keys = OFF")
         for number, script in enumerate(MIGRATIONS[version - BASELINE_VERSION:], start=version + 1):
             try:
-                conn.executescript(f"BEGIN; {script} PRAGMA user_version = {number}; COMMIT;")
+                if callable(script):
+                    conn.execute("BEGIN")
+                    script(conn)
+                    conn.execute(f"PRAGMA user_version = {number}")  # not a value: no placeholder
+                    conn.commit()
+                else:
+                    conn.executescript(f"BEGIN; {script} PRAGMA user_version = {number}; COMMIT;")
             except Exception:
                 if conn.in_transaction:
                     conn.rollback()

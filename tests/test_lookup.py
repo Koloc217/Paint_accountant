@@ -286,6 +286,31 @@ def test_entities_are_decoded_and_the_colour_beats_the_range(client, monkeypatch
     assert [tags[i] for i in s["tag_ids"]] == ["Металлик"]
 
 
+@pytest.mark.parametrize("title, brand, name, code, tag", [
+    ("Mr Hobby C137 Aqueous Hobby Color Tire Black 10ml", "GSI Creos", "Tire Black", "C137", None),
+    # "Mr. Color" spelled without the dot still has to go, and lacquer means alcohol-thinned
+    ("Mr. Color C1 White Gloss Lacquer Paint 10ml", "Mr. Hobby", "White Gloss", "C1", "Спиртовая"),
+    ("GSI Creos Mr Metal Color MC211 Chrome Silver", "GSI Creos", "Chrome Silver", "MC211", "Металлик"),
+    ("Mr.Hobby H12 Flat Black Aqueous 10ml", "Mr Hobby", "Flat Black", "H12", None),
+    # another maker's lacquer paint is tagged too, and keeps its own kind of code
+    ("Tamiya LP-5 Semi Gloss Black Lacquer Paint 10ml", "Tamiya", "Semi Gloss Black", "LP-5", "Спиртовая"),
+])
+def test_mr_hobby_and_alcohol_paints(client, monkeypatch, title, brand, name, code, tag):
+    _answer(monkeypatch, data={"items": [{"title": title, "brand": brand}]})
+    s = client.get("/api/lookup/upcitemdb", params={"barcode": "4973028737301"}).json()["suggestion"]
+    tags = {t["id"]: t["name"] for t in client.get("/api/tags").json()}
+    assert (s["name"], s["code"]) == (name, code)
+    assert s["manufacturer"]["name"] == ("Tamiya" if brand == "Tamiya" else "Mr. Hobby")
+    assert [tags[i] for i in s["tag_ids"]] == ([tag] if tag else [])
+
+
+def test_a_letter_and_digits_are_a_code_only_for_mr_hobby(client, monkeypatch):
+    """"C12" on its own says nothing: it is read only once the paint is known to be theirs."""
+    _answer(monkeypatch, data={"items": [{"title": "Pro Acryl C12 Bold Titanium White", "brand": "Monument Hobbies"}]})
+    s = client.get("/api/lookup/upcitemdb", params={"barcode": "0850025932011"}).json()["suggestion"]
+    assert s["code"] is None and s["manufacturer"] is None
+
+
 def test_several_listings_the_one_with_a_name_wins(client, monkeypatch):
     nothing = {"title": "Citadel Base Paint Pot - Games Workshop - All Colors!", "brand": "Citadel Miniatures"}
     _answer(monkeypatch, data={"items": [nothing, MEPHISTON]})

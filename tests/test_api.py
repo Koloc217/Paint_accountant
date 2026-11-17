@@ -142,12 +142,13 @@ def test_reopen_keeps_data(tmp_path):
         _paint(c)
     with TestClient(create_app(settings)) as c:
         assert len(c.get("/api/paints").json()) == 1
-        assert len(c.get("/api/tags").json()) == 11  # starter tags not duplicated
+        assert len(c.get("/api/tags").json()) == 12  # starter tags not duplicated
 
 
 def test_starter_manufacturers(client):
     names = [m["name"] for m in client.get("/api/manufacturers").json()]
-    assert names == ["AK", "Citadel", "Green Stuff World", "Kaleido", "Kimera", "Scale75", "Tamiya", "Vallejo"]
+    assert names == ["AK", "Citadel", "Green Stuff World", "Kaleido", "Kimera", "Mr. Hobby",
+                     "Scale75", "Tamiya", "Vallejo"]
 
 
 def test_paint_by_manufacturer_id_or_name(client):

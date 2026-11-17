@@ -264,7 +264,7 @@ SHOP_WORDS = {
 
 # ranges that aren't tags of ours ("Citadel Dry", "Army Painter Spray"): not a colour's name
 # either, so they are trimmed off the edges of one just like the kinds we do tag
-EXTRA_KINDS = {"dry", "spray", "sprays"}
+EXTRA_KINDS = {"dry", "spray", "sprays", "aqueous"}
 
 # "...Pot Paint For Base": the pot is a Technical one, Base is just what it goes over
 CROSS_REFERENCE = re.compile(r"\b(?:for|over|under|with|onto|on)\s+(\w+)", re.I)
@@ -329,10 +329,14 @@ def _find_maker(item: dict, barcode: str, makers: list[dict], conn: sqlite3.Conn
 
 
 def _strip_phrases(text: str, phrases: list[str]) -> str:
-    """Cut whole phrases out of the text, whatever the case; longest first ("Green Stuff World" before "Green")."""
+    """Cut whole phrases out of the text, whatever the case; longest first ("Green Stuff World"
+    before "Green"). Only the letters and digits of a phrase have to match, so "Mr. Hobby"
+    also catches "Mr Hobby" and "Mr.Hobby"."""
     for phrase in sorted({p for p in phrases if p}, key=len, reverse=True):
-        words = [re.escape(w) for w in phrase.split()]
-        text = re.sub(r"(?<![\w])" + r"[\s\-]*".join(words) + r"(?![\w])", " ", text, flags=re.I)
+        words = [re.escape(w) for w in re.findall(r"\w+", phrase)]
+        if not words:
+            continue
+        text = re.sub(r"(?<![\w])" + r"\W*".join(words) + r"(?![\w])", " ", text, flags=re.I)
     return text
 
 

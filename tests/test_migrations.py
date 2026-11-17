@@ -35,10 +35,12 @@ def test_fresh_database_starts_with_the_starter_data(tmp_path):
                            JOIN tag_name ru ON ru.tag_id = t.id AND ru.lang = 'ru'
                            JOIN tag_name en ON en.tag_id = t.id AND en.lang = 'en' ORDER BY t.id""").fetchall()
     assert [tuple(r) for r in tags] == [(i, ru, en, color) for i, (ru, en, color, _) in enumerate(db.STARTER_TAGS, 1)]
-    assert tuple(tags[0]) == (1, "Грунт", "Primer", "#9e9e9e") and tags[10][1] == "Техническая"
+    assert tuple(tags[0]) == (1, "Грунт", "Primer", "#9e9e9e")
+    assert [t[1] for t in tags[-2:]] == ["Спиртовая", "Техническая"]
     words = {(r[0], r[1]) for r in conn.execute("SELECT keyword, tag_id FROM tag_keyword")}
-    assert {("primer", 1), ("accent", 5), ("pigment", 6), ("quickshade", 8), ("revitalizer", 11)} <= words
-    assert len(words) == sum(len(kws) for *_, kws in db.STARTER_TAGS) == 37
+    assert {("primer", 1), ("accent", 5), ("pigment", 6), ("quickshade", 8), ("alcohol", 11),
+            ("revitalizer", 12)} <= words
+    assert len(words) == sum(len(kws) for *_, kws in db.STARTER_TAGS) == 39
     assert [tuple(r) for r in conn.execute("SELECT lang, name FROM storage_name ORDER BY lang")] == \
         [("en", "At hand"), ("ru", "Под рукой")]
     assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
@@ -216,3 +218,57 @@ def test_old_sqlite_is_explained(monkeypatch, tmp_path):
     monkeypatch.setattr(db.sqlite3, "sqlite_version", "3.31.1")
     with pytest.raises(db.OldSQLite, match="SQLite 3.31.1, the app needs 3.35"):
         db.init_db(tmp_path / "paints.sqlite3")
+
+
+def _as_before(conn: sqlite3.Connection) -> None:
+    """A database as it was before Mr. Hobby and the alcohol tag were starter data."""
+    with conn:
+        conn.execute("DELETE FROM manufacturer WHERE name = 'Mr. Hobby'")
+        conn.execute("DELETE FROM tag WHERE id IN (SELECT tag_id FROM tag_keyword WHERE keyword = 'alcohol')")
+
+
+def _alcohol(conn: sqlite3.Connection) -> list[tuple]:
+    return [tuple(r) for r in conn.execute(
+        """SELECT ru.name, en.name, t.color, (SELECT group_concat(keyword, ',') FROM tag_keyword k
+                                              WHERE k.tag_id = t.id ORDER BY keyword)
+           FROM tag t JOIN tag_name ru ON ru.tag_id = t.id AND ru.lang = 'ru'
+                      JOIN tag_name en ON en.tag_id = t.id AND en.lang = 'en'
+           WHERE ru.name = 'Спиртовая' OR en.name = 'Alcohol-based'""")]
+
+
+def test_mr_hobby_and_the_alcohol_tag_reach_an_older_database(tmp_path):
+    path = tmp_path / "paints.sqlite3"
+    conn = _baseline(path)
+    _as_before(conn)
+    with conn:  # a paint of the user's own, to be left alone
+        conn.execute("INSERT INTO paint (id, name, manufacturer_id) VALUES (1, 'Nuln Oil', 2)")
+    conn.close()
+
+    for _ in range(2):  # the second run must change nothing
+        db.init_db(path)
+        conn = db.connect(path)
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+        assert [r[0] for r in conn.execute("SELECT name FROM manufacturer WHERE name = 'Mr. Hobby'")] == ["Mr. Hobby"]
+        assert _alcohol(conn) == [("Спиртовая", "Alcohol-based", "#7cb342", "alcohol,lacquer")]
+        assert conn.execute("SELECT count(*) FROM tag").fetchone()[0] == len(db.STARTER_TAGS)
+        assert conn.execute("SELECT count(*) FROM paint").fetchone()[0] == 1
+        assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+        conn.close()
+
+
+def test_a_tag_of_your_own_by_that_name_is_left_alone(tmp_path):
+    """Someone who already sorted his alcohol paints keeps his tag: no second one appears."""
+    path = tmp_path / "paints.sqlite3"
+    conn = _baseline(path)
+    _as_before(conn)
+    with conn:
+        mine = conn.execute("INSERT INTO tag (color) VALUES ('#111111')").lastrowid
+        conn.executemany("INSERT INTO tag_name (tag_id, lang, name) VALUES (?, ?, ?)",
+                         [(mine, "ru", "Спиртовая"), (mine, "en", "Alcohol")])
+    conn.close()
+
+    db.init_db(path)
+    conn = db.connect(path)
+    assert _alcohol(conn) == [("Спиртовая", "Alcohol", "#111111", None)]  # his colour, his names, no keywords
+    assert conn.execute("SELECT count(*) FROM tag").fetchone()[0] == len(db.STARTER_TAGS)
+    conn.close()
