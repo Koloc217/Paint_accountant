@@ -256,6 +256,28 @@ def test_mr_hobby_and_the_alcohol_tag_reach_an_older_database(tmp_path):
         conn.close()
 
 
+@pytest.mark.parametrize("already, expected", [
+    (None, ["Army Painter"]),                      # not there: added
+    ("The Army Painter", ["The Army Painter"]),    # the user's own spelling is kept, alone
+    ("army painter", ["army painter"]),
+])
+def test_army_painter_is_added_unless_one_is_there(tmp_path, already, expected):
+    path = tmp_path / "paints.sqlite3"
+    conn = _baseline(path)
+    with conn:
+        conn.execute("DELETE FROM manufacturer WHERE py_lower(name) = py_lower('Army Painter')")
+        if already:
+            conn.execute("INSERT INTO manufacturer (name) VALUES (?)", (already,))
+    conn.close()
+
+    for _ in range(2):  # and the second run adds no second one
+        db.init_db(path)
+        conn = db.connect(path)
+        assert [r[0] for r in conn.execute(
+            "SELECT name FROM manufacturer WHERE py_lower(name) LIKE '%army painter%'")] == expected
+        conn.close()
+
+
 def test_xpress_joins_whichever_tag_contrast_belongs_to(tmp_path):
     path = tmp_path / "paints.sqlite3"
     conn = _baseline(path)

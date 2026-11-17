@@ -147,8 +147,8 @@ def test_reopen_keeps_data(tmp_path):
 
 def test_starter_manufacturers(client):
     names = [m["name"] for m in client.get("/api/manufacturers").json()]
-    assert names == ["AK", "Citadel", "Green Stuff World", "Kaleido", "Kimera", "Mr. Hobby",
-                     "Scale75", "Tamiya", "Vallejo"]
+    assert names == ["AK", "Army Painter", "Citadel", "Green Stuff World", "Kaleido", "Kimera",
+                     "Mr. Hobby", "Scale75", "Tamiya", "Vallejo"]
 
 
 def test_paint_by_manufacturer_id_or_name(client):
@@ -174,13 +174,15 @@ def test_paint_by_manufacturer_id_or_name(client):
 
 
 def test_manufacturer_crud(client):
-    m = client.post("/api/manufacturers", json={"name": " Army Painter "}).json()
-    assert m["name"] == "Army Painter" and m["paint_count"] == 0
-    assert client.post("/api/manufacturers", json={"name": "army painter"}).status_code == 409
+    # one that a new database doesn't start with, so it is this test's to create and delete
+    m = client.post("/api/manufacturers", json={"name": " Monument Hobbies "}).json()
+    assert m["name"] == "Monument Hobbies" and m["paint_count"] == 0
+    assert client.post("/api/manufacturers", json={"name": "monument hobbies"}).status_code == 409
+    assert client.post("/api/manufacturers", json={"name": "army painter"}).status_code == 409  # a starter one
     assert client.post("/api/manufacturers", json={"name": "  "}).status_code == 422
 
-    r = client.patch(f"/api/manufacturers/{m['id']}", json={"name": "The Army Painter"})
-    assert r.json()["name"] == "The Army Painter"
+    r = client.patch(f"/api/manufacturers/{m['id']}", json={"name": "Monument Hobbies LLC"})
+    assert r.json()["name"] == "Monument Hobbies LLC"
     assert client.patch(f"/api/manufacturers/{m['id']}", json={"name": "citadel"}).status_code == 409
 
     p = _paint(client, manufacturer=None, manufacturer_id=m["id"], name="Matt Black")

@@ -127,8 +127,8 @@ BASELINE = f"""
 
 # ---- what a new database starts with (all of it can be renamed or deleted in the app)
 
-STARTER_MANUFACTURERS = ["AK", "Citadel", "Green Stuff World", "Kaleido", "Kimera", "Mr. Hobby",
-                         "Tamiya", "Vallejo", "Scale75"]
+STARTER_MANUFACTURERS = ["AK", "Army Painter", "Citadel", "Green Stuff World", "Kaleido", "Kimera",
+                         "Mr. Hobby", "Tamiya", "Vallejo", "Scale75"]
 
 # (Russian name, English name, plaque color, words on a label that suggest the tag)
 STARTER_TAGS: list[tuple[str, str, str, list[str]]] = [
@@ -235,6 +235,13 @@ MIGRATIONS: list[str | Callable[[sqlite3.Connection], None]] = [
     """
     INSERT OR IGNORE INTO tag_keyword (keyword, tag_id)
         SELECT 'xpress', tag_id FROM tag_keyword WHERE keyword = 'contrast';
+    """,
+    # 19 — Army Painter among the manufacturers a new database starts with. Not if one is
+    #      there already, under either spelling of the name.
+    """
+    INSERT INTO manufacturer (name) SELECT 'Army Painter'
+        WHERE NOT EXISTS (SELECT 1 FROM manufacturer
+                          WHERE py_lower(name) IN (py_lower('Army Painter'), py_lower('The Army Painter')));
     """,
 ]
 

@@ -390,22 +390,29 @@ def test_xpress_color_is_a_contrast_paint(client, monkeypatch):
     assert [tags[i] for i in s["tag_ids"]] == ["Контраст"]
 
 
-def test_a_brand_not_in_the_catalog_is_still_cleaned_off_the_name(client, monkeypatch):
-    """"The Army Painter" is written "Army Painter" as often as not, and isn't a maker here yet."""
+def test_a_brand_written_another_way_is_still_cleaned_off_the_name(client, monkeypatch):
+    """"The Army Painter" is written "Army Painter" as often as not; we have them as the latter."""
     _answer(monkeypatch, data={"items": [
         {"title": "Army Painter Speedpaint 2.0 Zealot Yellow", "brand": "The Army Painter"}]})
     s = client.get("/api/lookup/upcitemdb", params={"barcode": "5713799110403"}).json()["suggestion"]
     tags = {t["id"]: t["name"] for t in client.get("/api/tags").json()}
     assert s["name"] == "Zealot Yellow" and [tags[i] for i in s["tag_ids"]] == ["Контраст"]
-    # offered under the name we know them by, so the next pot of theirs finds this one
-    assert s["manufacturer"] is None and s["new_manufacturer"] == "Army Painter"
+    assert s["manufacturer"]["name"] == "Army Painter" and s["new_manufacturer"] is None
+
+
+def test_a_brand_not_in_the_catalog_is_offered_under_the_name_we_know(client, monkeypatch):
+    """Nobody matches, so the brand is offered as it is — there is no better name for it."""
+    _answer(monkeypatch, data={"items": [
+        {"title": "Pro Acryl Bold Titanium White 22ml", "brand": "MONUMENT HOBBIES"}]})
+    s = client.get("/api/lookup/upcitemdb", params={"barcode": "0850025932011"}).json()["suggestion"]
+    assert s["manufacturer"] is None and s["new_manufacturer"] == "Monument Hobbies"
 
 
 def test_a_code_is_kept_when_the_brand_and_the_pattern_agree(client, monkeypatch):
     _answer(monkeypatch, data={"items": [
         {"title": "The Army Painter Warpaints Fanatic WP3001 Matt Black", "brand": "The Army Painter"}]})
     s = client.get("/api/lookup/upcitemdb", params={"barcode": "5713799110403"}).json()["suggestion"]
-    assert s["code"] == "WP3001" and s["new_manufacturer"] == "Army Painter"
+    assert s["code"] == "WP3001" and s["manufacturer"]["name"] == "Army Painter"
 
 
 # an answer of the free plan, word for word: one item, no offers, and brand, model and
