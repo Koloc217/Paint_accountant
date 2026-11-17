@@ -522,6 +522,24 @@ def test_a_shop_prefix_before_aks_own_code(client, monkeypatch, model):
     assert s["manufacturer"]["name"] == "AK"  # the brand is written "AK-Interactive" here
 
 
+def test_a_shop_prefix_before_mr_hobbys_code(client, monkeypatch):
+    """A real answer: "GUZH23" is GUZ, the shop's own, in front of Mr. Hobby's H-23."""
+    _answer(monkeypatch, data={"items": [
+        {"title": "GUZH23 10 ml Gloss Bottle Paint, Shine Red", "brand": "Gunze", "model": "GUZH23",
+         "offers": [{"title": "GUZH23 10 ml Gloss Bottle Paint, Shine Red"}]}]})
+    s = client.get("/api/lookup/upcitemdb", params={"barcode": "4973028738544"}).json()["suggestion"]
+    assert (s["name"], s["code"]) == ("Shine Red", "H-23")
+    assert s["manufacturer"]["name"] == "Mr. Hobby"  # "Gunze" is the company that makes them
+
+
+def test_mr_hobby_by_barcode_when_the_brand_is_a_shop(client, monkeypatch):
+    """4973028… is theirs, so a reseller's name in the brand field settles nothing."""
+    _answer(monkeypatch, data={"items": [
+        {"title": "10 ml Gloss Bottle Paint, Shine Red", "brand": "UnbeatableSale", "model": "GUZH23"}]})
+    s = client.get("/api/lookup/upcitemdb", params={"barcode": "4973028738544"}).json()["suggestion"]
+    assert s["manufacturer"]["name"] == "Mr. Hobby" and s["code"] == "H-23"
+
+
 def test_several_listings_the_one_with_a_name_wins(client, monkeypatch):
     nothing = {"title": "Citadel Base Paint Pot - Games Workshop - All Colors!", "brand": "Citadel Miniatures"}
     _answer(monkeypatch, data={"items": [nothing, MEPHISTON]})

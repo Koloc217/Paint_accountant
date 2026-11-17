@@ -245,6 +245,7 @@ ALIASES = {
     "premium color": "Vallejo",
     "gsi creos": "Mr. Hobby",
     "gunze sangyo": "Mr. Hobby",
+    "gunze": "Mr. Hobby",  # how shops name the company that makes them
     # Mr. Hobby prints the line, not the company: "Mr.COLOR", "AQUEOUS HOBBY COLOR"
     "mr color": "Mr. Hobby",
     "mr colour": "Mr. Hobby",
@@ -428,6 +429,7 @@ BARCODE_PREFIXES = {
     "5713799": "Army Painter",
     "8435568": "AK",
     "4950344": "Tamiya",
+    "4973028": "Mr. Hobby",
 }
 PREFIX_LEN = 7
 
