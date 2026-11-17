@@ -288,8 +288,9 @@ EXTRA_KINDS = {"dry", "spray", "sprays", "aqueous", "general"}
 CROSS_REFERENCE = re.compile(r"\b(?:for|over|under|with|onto|on)\s+(\w+)", re.I)
 
 # a shop's own letters in front of a number: "GAW21-03" is Citadel's 21-03, "val76515"
-# and "VJP76515" are Vallejo's 76.515, "GAW9918995020406" is a wholesale number of its own
-RETAILER_SKU = re.compile(r"\b(?:GAW|VAL|VJP?)(?=\d)", re.I)
+# and "VJP76515" are Vallejo's 76.515, "GAW9918995020406" is a wholesale number of its own.
+# "AKI" comes before AK's own code rather than before digits: "AKIAK11091" is AK11091
+RETAILER_SKU = re.compile(r"\b(?:GAW|VAL|VJP?)(?=\d)|\bAKI(?=AK\d)", re.I)
 
 # Vallejo prints "76.515" but shops write "76515"; only worth reading when we already know
 # the paint is Vallejo's, since a bare five-digit number proves nothing on its own

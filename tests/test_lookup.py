@@ -504,6 +504,17 @@ def test_plural_kinds_and_shop_shorthand(client, monkeypatch, title, expected):
     assert s["name"] == expected
 
 
+@pytest.mark.parametrize("model", ["AKIAK11091", "AK11091", "AKI AK11091", "AK-11091"])
+def test_a_shop_prefix_before_aks_own_code(client, monkeypatch, model):
+    """A real answer: AK's Carmine, whose code the shop writes as "AKIAK11091"."""
+    _answer(monkeypatch, data={"items": [
+        {"title": "Carmine (17ml) New", "brand": "AK-Interactive", "model": model,
+         "offers": [{"title": "Carmine (17ml) New"}]}]})
+    s = client.get("/api/lookup/upcitemdb", params={"barcode": "8435568303249"}).json()["suggestion"]
+    assert (s["name"], s["code"]) == ("Carmine", "AK11091")
+    assert s["manufacturer"]["name"] == "AK"  # the brand is written "AK-Interactive" here
+
+
 def test_several_listings_the_one_with_a_name_wins(client, monkeypatch):
     nothing = {"title": "Citadel Base Paint Pot - Games Workshop - All Colors!", "brand": "Citadel Miniatures"}
     _answer(monkeypatch, data={"items": [nothing, MEPHISTON]})
