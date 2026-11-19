@@ -7,6 +7,15 @@ import { render } from './router.js';
 import { newFilters, paintBrowser, storageFilters } from './paints.js';
 import { getLabelSize, qrImg, saveImageButton, storageLink } from './labels.js';
 
+// Order of the storage list: 'default' = as the server sends it (default / at hand first, then by name)
+const STORAGE_SORTS = {
+  paints_desc: (a, b) => b.paint_count - a.paint_count || b.pot_count - a.pot_count,
+  paints_asc: (a, b) => a.paint_count - b.paint_count || a.pot_count - b.pot_count,
+  pots_desc: (a, b) => b.pot_count - a.pot_count || b.paint_count - a.paint_count,
+  pots_asc: (a, b) => a.pot_count - b.pot_count || a.paint_count - b.paint_count,
+};
+let storageSort = 'default';
+
 export async function viewStorages(mount) {
   const storages = await api('GET', '/storages');
 
@@ -31,20 +40,34 @@ export async function viewStorages(mount) {
       list.querySelectorAll('.storage-card').forEach(c => { c.hidden = q && !c.dataset.search.includes(q); });
     },
   });
+  const cards = new Map(storages.map(s => [s,
+    h('a', { class: 'card storage-card', href: `#/storage/${s.id}`, 'data-search': `${s.name} ${s.nfc_tag || ''}`.toLowerCase() },
+      h('span', { class: 'storage-icon' + (s.at_hand ? ' hand' : '') }, s.at_hand ? '✋' : '📦'),
+      h('div', { class: 'grow' },
+        h('div', { class: 'name' }, s.name, ' ',
+          s.is_default ? h('span', { class: 'badge' }, t('по умолчанию')) : s.at_hand ? h('span', { class: 'badge' }, t('под рукой')) : null),
+        h('div', { class: 'muted small' }, `${countPaints(s.paint_count)} · ${countPots(s.pot_count)}`,
+          s.copies_storage ? t(' · дубликаты → {0}', s.copies_storage.name) : '', s.nfc_tag ? t(' · метка') : '')),
+      h('span', { class: 'chev' }, '›'))]));
   const list = storages.length
-    ? h('div', { class: 'card-list' }, storages.map(s =>
-      h('a', { class: 'card storage-card', href: `#/storage/${s.id}`, 'data-search': `${s.name} ${s.nfc_tag || ''}`.toLowerCase() },
-        h('span', { class: 'storage-icon' + (s.at_hand ? ' hand' : '') }, s.at_hand ? '✋' : '📦'),
-        h('div', { class: 'grow' },
-          h('div', { class: 'name' }, s.name, ' ',
-            s.is_default ? h('span', { class: 'badge' }, t('по умолчанию')) : s.at_hand ? h('span', { class: 'badge' }, t('под рукой')) : null),
-          h('div', { class: 'muted small' }, `${countPaints(s.paint_count)} · ${countPots(s.pot_count)}`,
-            s.copies_storage ? t(' · дубликаты → {0}', s.copies_storage.name) : '', s.nfc_tag ? t(' · метка') : '')),
-        h('span', { class: 'chev' }, '›'))))
+    ? h('div', { class: 'card-list' })
     : h('div', { class: 'empty' }, t('Хранилищ пока нет. Коробки, ящики, полки — всё, где лежат краски.'));
+  const drawList = () => {
+    const by = STORAGE_SORTS[storageSort];
+    list.replaceChildren(...(by ? [...storages].sort(by) : storages).map(s => cards.get(s)));  // stable: ties keep the default order
+  };
+  if (storages.length) drawList();
+
+  const sortSel = h('select', { class: 'input', 'aria-label': t('Сортировка'), onchange: e => { storageSort = e.target.value; drawList(); } },
+    h('option', { value: 'default' }, t('Стандартный порядок')),
+    h('option', { value: 'paints_desc' }, t('Больше красок')),
+    h('option', { value: 'paints_asc' }, t('Меньше красок')),
+    h('option', { value: 'pots_desc' }, t('Больше банок')),
+    h('option', { value: 'pots_asc' }, t('Меньше банок')));
+  sortSel.value = storageSort;
 
   mount(h('div', null, pageHead(t('Хранилища'), null,
-    storages.length ? h('a', { class: 'btn', href: '#/labels', style: 'margin-left:auto' }, t('🖨 QR-метки')) : null), form, h('h2', null, t('Все хранилища')), storages.length > 3 ? h('div', { style: 'margin-bottom:8px' }, find) : null, list));
+    storages.length ? h('a', { class: 'btn', href: '#/labels', style: 'margin-left:auto' }, t('🖨 QR-метки')) : null), form, h('h2', null, t('Все хранилища')), storages.length > 1 ? h('div', { class: 'row', style: 'margin-bottom:8px' }, storages.length > 3 ? h('div', { class: 'grow' }, find) : null, sortSel) : null, list));
 }
 
 export async function viewStorage(mount, id) {
