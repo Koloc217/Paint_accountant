@@ -401,7 +401,10 @@ async function exportDialog(params, filtered) {
   }
   try {
     const res = await fetch('/api/export/paints.md?' + q);
-    if (!res.ok) throw new Error(res.statusText);
+    if (!res.ok) {
+      toast(res.statusText || t('Ошибка {0}', res.status), 'err');
+      return;
+    }
     toast(await copyText(await res.text()) ? t('Список скопирован') : t('Не получилось скопировать — скачайте файл'), '');
   } catch (e) {
     toast(explain(e), 'err');

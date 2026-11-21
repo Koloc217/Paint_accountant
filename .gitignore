@@ -13,3 +13,8 @@ data/
 *.sqlite3.bak-*
 *.bak-*
 .aider*
+
+# IDE and temporary files
+.idea/
+*.iml
+*.csv

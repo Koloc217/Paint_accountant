@@ -1,3 +1,4 @@
+/* noinspection JSNonASCIINames,NonAsciiCharacters,RedundantEscapeInRegExp */
 /* Interface language. Russian text is the key; EN holds the English version.
  * The language is set in config.ini ([ui] language, also from Settings) for every device;
  * the server puts it into <html data-lang>. "auto" means the browser's language. */
@@ -37,7 +38,7 @@ export function localizeBuiltins(data) {
   return data;
 }
 
-// noinspection NonAsciiCharacters
+// noinspection JSNonASCIINames,NonAsciiCharacters
 const EN = {
   "Выгрузить": "Export",
   "Выгрузить список": "Export the list",
