@@ -150,14 +150,18 @@ export async function viewStats(mount) {
   }
 
   const tidy = d.tidy || {};
-  const tidyCount = (tidy.no_tag || 0) + (tidy.no_color || 0) + (tidy.no_barcode || 0);
-  const tidyDetails = [
-    tidy.no_tag ? t('без тега: {0}', tidy.no_tag) : null,
-    tidy.no_color ? t('без цвета: {0}', tidy.no_color) : null,
-    tidy.no_barcode ? t('без штрихкода: {0}', tidy.no_barcode) : null,
+  const tidyItems = [
+    tidy.no_tag ? t('Без тега: {0}', tidy.no_tag) : null,
+    tidy.no_color ? t('Без цвета: {0}', tidy.no_color) : null,
+    tidy.no_barcode ? t('Без штрихкода: {0}', tidy.no_barcode) : null,
   ].filter(Boolean);
-  const tidySub = tidyCount ? tidyDetails.join(' · ') : t('всё в порядке');
-  const tidyTitle = tidyDetails.join('\n');
+
+  const tidyTile = tidyItems.length
+    ? h('div', { class: 'stat-tile stat-tile-tidy' + (tidyItems.length >= 3 ? ' many' : ''), title: tidyItems.join('\n') },
+        tidyItems.map(txt => h('div', { class: 'stat-tidy-line' }, txt)))
+    : h('div', { class: 'stat-tile', title: t('всё в порядке') },
+        h('div', { class: 'stat-value', style: 'color: var(--accent);' }, '✓'),
+        h('div', { class: 'muted small' }, t('всё в порядке')));
 
   const blocks = [where, makers, colorSection, tags, repeats, twins].filter(Boolean);
   const sections = h('div', { class: 'stat-blocks' }, ...blocks);
@@ -167,6 +171,6 @@ export async function viewStats(mount) {
       tile(tot.paints, t('красок')),
       tile(tot.pots, t('банок')),
       tile(tot.storages, t('хранилищ')),
-      tile(tidyCount, t('навести порядок'), tidySub, tidyTitle)),
+      tidyTile),
     sections));
 }

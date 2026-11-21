@@ -950,6 +950,10 @@ body.selecting #toast { bottom: calc(170px + env(safe-area-inset-bottom)); }
 }
 .stat-value { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
 .stat-sub { font-size: 11px; color: var(--muted); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.stat-tile-tidy { gap: 6px; }
+.stat-tile-tidy.many { gap: 3px; }
+.stat-tidy-line { font-size: 16px; font-weight: 600; color: var(--text); line-height: 1.3; white-space: nowrap; }
+.stat-tile-tidy.many .stat-tidy-line { font-size: 14px; }
 
 .bars { display: grid; gap: 10px; }
 .bar-row {
