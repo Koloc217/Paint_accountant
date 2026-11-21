@@ -275,6 +275,8 @@ def test_thinner_label_suggests_technical_tag(client, conn):
         ("Weathering Pigments", "Спецэффект"),
         ("Rust Pigment", "Спецэффект"),
         ("Astrogranite Texture", "Спецэффект"),
+        ("Oil Paint", "Масляные"),
+        ("Oilbrusher", "Масляные"),
     ],
 )
 def test_label_words_suggest_tags(client, conn, label, tag):

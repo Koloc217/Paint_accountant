@@ -443,11 +443,14 @@ def clean_title(title: str, maker_names: list[str], code: str | None, tag_words:
             rest = core[:-1]
             if not rest or (len(rest) == 1 and rec.norm(rest[0]) in FINISHES):
                 break
+            # "Nuln Oil" is Citadel's paint name, not an oil paint in a "Nuln" colour
+            if rec.norm(core[-1]) == "oil" and rest and rec.norm(rest[-1]) == "nuln":
+                break
             core = rest
 
         # the piece that names a colour rather than a range: "MW: Wash: Light Grey" is not
         # called "MW", and "True Metallic Metal Light Paint, Ancient Copper" is a copper
-        kinds_here = len([w for w in core if kind_of(w, tag_words)])
+        kinds_here = len([w for w in core if kind_of(w, tag_words) and not (rec.norm(w) == "oil" and "nuln" in [rec.norm(x) for x in core])])
         colour = len(core) - 2 * kinds_here
         if colour > found:
             best, found = rec.clean_name(" ".join(core))[:200], colour
@@ -530,6 +533,8 @@ def suggest(conn: sqlite3.Connection, barcode: str, item: dict) -> dict[str, Any
         name = clean_title(title, names, code, kinds)
         real = {rec.norm(w) for w in name.split() if not kind_of(w, kinds)}
         words = set(rec.norm(title).split())
+        if "nuln oil" in rec.norm(title):
+            words.discard("oil")
         said = {k for k in (kind_of(w, kinds) for w in words) if k}
         # a listing of the whole range names no colour of its own — "Base, Layer, Contrast
         # & Shade", "GENERAL Series … Singles" — and its kinds are not this pot's tags

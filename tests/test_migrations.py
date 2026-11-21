@@ -36,11 +36,11 @@ def test_fresh_database_starts_with_the_starter_data(tmp_path):
                            JOIN tag_name en ON en.tag_id = t.id AND en.lang = 'en' ORDER BY t.id""").fetchall()
     assert [tuple(r) for r in tags] == [(i, ru, en, color) for i, (ru, en, color, _) in enumerate(db.STARTER_TAGS, 1)]
     assert tuple(tags[0]) == (1, "Грунт", "Primer", "#9e9e9e")
-    assert [t[1] for t in tags[-2:]] == ["Спиртовая", "Техническая"]
+    assert [t[1] for t in tags[-3:]] == ["Спиртовая", "Масляные", "Техническая"]
     words = {(r[0], r[1]) for r in conn.execute("SELECT keyword, tag_id FROM tag_keyword")}
     assert {("primer", 1), ("xpress", 4), ("accent", 5), ("pigment", 6), ("quickshade", 8),
-            ("alcohol", 11), ("revitalizer", 12)} <= words
-    assert len(words) == sum(len(kws) for *_, kws in db.STARTER_TAGS) == 40
+            ("alcohol", 11), ("oil", 12), ("revitalizer", 13)} <= words
+    assert len(words) == sum(len(kws) for *_, kws in db.STARTER_TAGS) == 43
     assert [tuple(r) for r in conn.execute("SELECT lang, name FROM storage_name ORDER BY lang")] == \
         [("en", "At hand"), ("ru", "Под рукой")]
     assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
@@ -310,3 +310,56 @@ def test_a_tag_of_your_own_by_that_name_is_left_alone(tmp_path):
     assert _alcohol(conn) == [("Спиртовая", "Alcohol", "#111111", None)]  # his colour, his names, no keywords
     assert conn.execute("SELECT count(*) FROM tag").fetchone()[0] == len(db.STARTER_TAGS)
     conn.close()
+
+
+def _as_before_oil(conn: sqlite3.Connection) -> None:
+    """A database as it was before the oil tag was starter data."""
+    with conn:
+        conn.execute("DELETE FROM tag WHERE id IN (SELECT tag_id FROM tag_name WHERE name = 'Масляные' AND lang = 'ru')")
+
+
+def _oil(conn: sqlite3.Connection) -> list[tuple]:
+    return [tuple(r) for r in conn.execute(
+        """SELECT ru.name, en.name, t.color, (SELECT group_concat(keyword, ',') FROM tag_keyword k
+                                              WHERE k.tag_id = t.id ORDER BY keyword)
+           FROM tag t JOIN tag_name ru ON ru.tag_id = t.id AND ru.lang = 'ru'
+                      JOIN tag_name en ON en.tag_id = t.id AND en.lang = 'en'
+           WHERE ru.name = 'Масляные' OR en.name = 'Oil'""")]
+
+
+def test_oil_tag_reaches_an_older_database(tmp_path):
+    path = tmp_path / "paints.sqlite3"
+    conn = _baseline(path)
+    _as_before_oil(conn)
+    with conn:  # a paint of the user's own, to be left alone
+        conn.execute("INSERT INTO paint (id, name, manufacturer_id) VALUES (1, 'Abteilung Sepia', 2)")
+    conn.close()
+
+    for _ in range(2):  # the second run must change nothing
+        db.init_db(path)
+        conn = db.connect(path)
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+        assert _oil(conn) == [("Масляные", "Oil", "#ff8f00", "oil,oils,oilbrusher")]
+        assert conn.execute("SELECT count(*) FROM tag").fetchone()[0] == len(db.STARTER_TAGS)
+        assert conn.execute("SELECT count(*) FROM paint").fetchone()[0] == 1
+        assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+        conn.close()
+
+
+def test_a_tag_of_your_own_for_oil_is_left_alone(tmp_path):
+    """Someone who already sorted his oil paints keeps his tag: no second one appears."""
+    path = tmp_path / "paints.sqlite3"
+    conn = _baseline(path)
+    _as_before_oil(conn)
+    with conn:
+        mine = conn.execute("INSERT INTO tag (color) VALUES ('#222222')").lastrowid
+        conn.executemany("INSERT INTO tag_name (tag_id, lang, name) VALUES (?, ?, ?)",
+                         [(mine, "ru", "Масляные"), (mine, "en", "Oils")])
+    conn.close()
+
+    db.init_db(path)
+    conn = db.connect(path)
+    assert _oil(conn) == [("Масляные", "Oils", "#222222", None)]  # his colour, his names, no keywords
+    assert conn.execute("SELECT count(*) FROM tag").fetchone()[0] == len(db.STARTER_TAGS)
+    conn.close()
+

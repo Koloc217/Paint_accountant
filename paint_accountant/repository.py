@@ -8,6 +8,7 @@ case-sensitive.
 
 from __future__ import annotations
 
+import colorsys
 import re
 import sqlite3
 from typing import Any, Iterable
@@ -991,6 +992,60 @@ def merge_paints(conn: sqlite3.Connection, keep_id: int, from_id: int, barcode: 
 
 # ======================= statistics =======================
 
+COLOR_SPECTRUM: list[tuple[str, str, str, str]] = [
+    ("red", "Красные", "Red", "#e53935"),
+    ("orange", "Оранжевые", "Orange", "#fb8c00"),
+    ("yellow", "Жёлтые", "Yellow", "#fdd835"),
+    ("green", "Зелёные", "Green", "#43a047"),
+    ("teal", "Бирюзовые", "Teal", "#00acc1"),
+    ("blue", "Синие", "Blue", "#1e88e5"),
+    ("purple", "Фиолетовые", "Purple", "#8e24aa"),
+    ("brown", "Коричневые", "Brown", "#6d4c41"),
+    ("black", "Чёрные", "Black", "#212121"),
+    ("grey", "Серые", "Grey", "#757575"),
+    ("white", "Белые", "White", "#e0e0e0"),
+]
+
+
+def _hex_to_hsl(hex_str: str) -> tuple[float, float, float] | None:
+    h = hex_str.lstrip("#")
+    if len(h) != 6:
+        return None
+    try:
+        r, g, b = int(h[0:2], 16) / 255.0, int(h[2:4], 16) / 255.0, int(h[4:6], 16) / 255.0
+    except ValueError:
+        return None
+    h_val, l_val, s_val = colorsys.rgb_to_hls(r, g, b)
+    return h_val * 360.0, s_val * 100.0, l_val * 100.0
+
+
+def _classify_paint_color(h: float, s: float, l: float) -> str:
+    if l < 18:
+        return "black"
+    if l > 85 and s < 20:
+        return "white"
+    if s < 14:
+        return "grey"
+    # Browns / earth tones: warm hues (15 to 55 deg) with lower lightness or saturation
+    if 15 <= h < 55 and (l < 45 or s < 45):
+        return "brown"
+    if h >= 345 or h < 15:
+        return "red"
+    if 15 <= h < 45:
+        return "orange"
+    if 45 <= h < 70:
+        return "yellow"
+    if 70 <= h < 165:
+        return "green"
+    if 165 <= h < 200:
+        return "teal"
+    if 200 <= h < 260:
+        return "blue"
+    if 260 <= h < 345:
+        return "purple"
+    return "grey"
+
+
 def stats(conn: sqlite3.Connection) -> dict:
     """Numbers about the whole catalog: where the pots are, what repeats, what needs tidying."""
     def one(sql: str) -> int:
@@ -1044,12 +1099,44 @@ def stats(conn: sqlite3.Connection) -> dict:
         """SELECT m.id, m.name, count(DISTINCT p.id) AS paints, coalesce(sum(l.quantity), 0) AS pots
            FROM manufacturer m JOIN paint p ON p.manufacturer_id = m.id
            LEFT JOIN paint_location l ON l.paint_id = p.id
-           GROUP BY m.id ORDER BY pots DESC, paints DESC, m.name LIMIT 8""")]
+           GROUP BY m.id ORDER BY pots DESC, paints DESC, m.name""")]
 
     tnames = _tag_names(conn)
     tags = [_with_names(dict(r), tnames) for r in conn.execute(
         """SELECT t.id, t.color, count(pt.paint_id) AS paints
            FROM tag t JOIN paint_tag pt ON pt.tag_id = t.id GROUP BY t.id ORDER BY paints DESC, t.id""")]
+
+    # color spectrum / palette distribution
+    color_map: dict[str, dict] = {
+        gid: {"id": gid, "name": ru, "name_en": en, "color": swatch, "paints": 0, "pots": 0, "samples": []}
+        for gid, ru, en, swatch in COLOR_SPECTRUM
+    }
+    has_color_count = 0
+    for r in conn.execute(
+        """SELECT p.id, p.name, p.code, p.hex, m.name AS manufacturer,
+                  coalesce((SELECT sum(quantity) FROM paint_location WHERE paint_id = p.id), 0) AS pots
+           FROM paint p JOIN manufacturer m ON m.id = p.manufacturer_id
+           WHERE p.hex IS NOT NULL ORDER BY p.name"""):
+        hsl = _hex_to_hsl(r["hex"])
+        if hsl is None:
+            continue
+        has_color_count += 1
+        gid = _classify_paint_color(*hsl)
+        grp = color_map[gid]
+        grp["paints"] += 1
+        grp["pots"] += r["pots"]
+        if len(grp["samples"]) < 30:
+            grp["samples"].append({
+                "id": r["id"], "name": r["name"], "code": r["code"],
+                "hex": r["hex"], "manufacturer": r["manufacturer"], "pots": r["pots"],
+                "_l": hsl[2],
+            })
+
+    color_groups = [g for g in color_map.values() if g["paints"] > 0]
+    for g in color_groups:
+        g["samples"].sort(key=lambda x: x["_l"])
+        for s in g["samples"]:
+            del s["_l"]
 
     return {
         "totals": {
@@ -1064,6 +1151,11 @@ def stats(conn: sqlite3.Connection) -> dict:
         "possible_duplicates_total": len(twins),
         "manufacturers": makers,
         "tags": tags,
+        "colors": {
+            "total_with_color": has_color_count,
+            "without_color": one("SELECT count(*) FROM paint WHERE hex IS NULL"),
+            "groups": color_groups,
+        },
         "tidy": {
             "no_tag": one("SELECT count(*) FROM paint p WHERE NOT EXISTS (SELECT 1 FROM paint_tag WHERE paint_id = p.id)"),
             "no_color": one("SELECT count(*) FROM paint WHERE hex IS NULL"),

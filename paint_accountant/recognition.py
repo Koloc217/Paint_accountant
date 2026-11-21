@@ -257,6 +257,12 @@ ALIASES = {
     "scalecolor": "Scale75",
     "fantasy games": "Scale75",  # "Fantasy & Games" line; its logo font is rarely read right
     "fantasy and games": "Scale75",
+    "daler rowney": "Daler-Rowney",
+    "daler-rowney": "Daler-Rowney",
+    "fw inks": "Daler-Rowney",
+    "fw acrylic inks": "Daler-Rowney",
+    "fw acrylic ink": "Daler-Rowney",
+    "fw ink": "Daler-Rowney",
 }
 
 # product codes: (manufacturer it usually belongs to, pattern, formatter)
@@ -281,6 +287,8 @@ CODE_PATTERNS: list[tuple[str | None, re.Pattern, Any]] = [
     ("Mr. Hobby", re.compile(r"\b(GX|SM|MC|WC|UG|C|H)(?:\s?-\s?|)(\d{1,3})\b"), lambda m: f"{m[1].upper()}-{m[2]}"),
     # Green Stuff World: "1750 - PAINT REVITALIZER"
     ("Green Stuff World", re.compile(r"\b(\d{4,5})\s*[-–]\s*[A-Za-z]"), lambda m: m[1]),
+    # Daler-Rowney: "160029xxx" or "D160029xxx"
+    ("Daler-Rowney", re.compile(r"\b(?:D?160\s?029\s?|160029)(\d{3})\b", re.I), lambda m: f"160029{m[1]}"),
 ]
 
 
@@ -498,7 +506,10 @@ def reading_order(lines: list[Line]) -> str:
 
 
 def _tag_ids(text: str, keywords: list[tuple[str, int]]) -> list[int]:
-    words = set(norm(text).split())
+    n = norm(text)
+    words = set(n.split())
+    if "nuln oil" in n:
+        words.discard("oil")
     return sorted({tag_id for kw, tag_id in keywords if kw.lower() in words})
 
 

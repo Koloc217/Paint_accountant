@@ -814,3 +814,12 @@ def test_unsupported_proxy_and_interface_by_address():
     sock = lookup.open_tunnel("127.0.0.1", port, lookup.Route(interface="127.0.0.1"))  # send from this address
     assert sock.recv(5) == b"hello"
     sock.close()
+
+
+def test_oil_paint_lookup(client, monkeypatch):
+    _answer(monkeypatch, data={"items": [{"title": "Abteilung 502 Sepia Oil Paint 20ml", "brand": "Abteilung 502"}]})
+    s = client.get("/api/lookup/upcitemdb", params={"barcode": "8432074015021"}).json()["suggestion"]
+    tags = {t["id"]: t["name"] for t in client.get("/api/tags").json()}
+    assert s["name"] == "Sepia"
+    assert [tags[i] for i in s["tag_ids"]] == ["Масляные"]
+
