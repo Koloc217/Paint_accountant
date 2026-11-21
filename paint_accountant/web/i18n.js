@@ -22,7 +22,7 @@ export async function setLang(code) {
 /** t('Удалить «{0}»?', name) — the text in the current language with {0}, {1}… filled in. */
 export function t(text, ...args) {
   const s = (LANG === 'en' && EN[text]) || text;
-  return args.length ? s.replace(/\{(\d+)\}/g, (m, i) => (args[i] === undefined ? m : String(args[i]))) : s;
+  return args.length ? s.replace(/\{(\d+)}/g, (m, i) => (args[i] === undefined ? m : String(args[i]))) : s;
 }
 
 /** Names in the page's language anywhere in an API answer: tags and storages carry
@@ -37,6 +37,7 @@ export function localizeBuiltins(data) {
   return data;
 }
 
+// noinspection NonAsciiCharacters
 const EN = {
   "Выгрузить": "Export",
   "Выгрузить список": "Export the list",
