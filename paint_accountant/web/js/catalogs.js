@@ -162,9 +162,11 @@ function tagsSection(tags) {
       label: t('Название тега'), maxlength: 50,
       save: v => api('PATCH', `/tags/${tg.id}`, { name: v, lang: LANG }), // only in this language
     });
-    // the name in the other language: a new tag gets the same one, it can be changed there
-    const other = LANGS.filter(([code]) => code !== LANG)
-      .map(([code, label]) => `${label}: ${(tg.names && tg.names[code]) || tg.name}`).join(' · ');
+    // the name in the other language: only shown when interface is Russian to avoid Russian words on English locale
+    const other = LANG === 'en'
+      ? ''
+      : LANGS.filter(([code]) => code !== LANG)
+          .map(([code, label]) => `${t(label)}: ${(tg.names && tg.names[code]) || tg.name}`).join(' · ');
     const sub = [other, tg.keywords.length ? t('на этикетке: ') + tg.keywords.join(', ') : ''].filter(Boolean).join(' · ');
     return catRow({
       lead: color,

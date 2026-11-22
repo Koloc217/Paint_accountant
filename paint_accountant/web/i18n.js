@@ -1,3 +1,4 @@
+/* noinspection JSNonASCIINames,NonAsciiCharacters,RedundantEscapeInRegExp */
 /* Interface language. Russian text is the key; EN holds the English version.
  * The language is set in config.ini ([ui] language, also from Settings) for every device;
  * the server puts it into <html data-lang>. "auto" means the browser's language. */
@@ -22,7 +23,7 @@ export async function setLang(code) {
 /** t('Удалить «{0}»?', name) — the text in the current language with {0}, {1}… filled in. */
 export function t(text, ...args) {
   const s = (LANG === 'en' && EN[text]) || text;
-  return args.length ? s.replace(/\{(\d+)\}/g, (m, i) => (args[i] === undefined ? m : String(args[i]))) : s;
+  return args.length ? s.replace(/\{(\d+)}/g, (m, i) => (args[i] === undefined ? m : String(args[i]))) : s;
 }
 
 /** Names in the page's language anywhere in an API answer: tags and storages carry
@@ -37,6 +38,7 @@ export function localizeBuiltins(data) {
   return data;
 }
 
+// noinspection JSNonASCIINames,NonAsciiCharacters
 const EN = {
   "Выгрузить": "Export",
   "Выгрузить список": "Export the list",
@@ -73,6 +75,8 @@ const EN = {
   "банок": "pots",
   "хранилищ": "storages",
   "закончились": "ran out",
+  "навести порядок": "to tidy up",
+  "всё в порядке": "all tidy",
   "Где лежат банки": "Where the pots are",
   "Пустых хранилищ: {0}": "Empty storages: {0}",
   "Несколько банок одной краски": "Several pots of one paint",
@@ -84,7 +88,25 @@ const EN = {
   "и ещё {0}": "and {0} more",
   "По производителям": "By manufacturer",
   "По тегам": "By tag",
+  "Цветовая палитра": "Color palette",
+  "с цветом": "with color",
+  "Красные": "Red",
+  "Оранжевые": "Orange",
+  "Жёлтые": "Yellow",
+  "Зелёные": "Green",
+  "Бирюзовые": "Teal",
+  "Синие": "Blue",
+  "Фиолетовые": "Purple",
+  "Коричневые": "Brown",
+  "Чёрные": "Black",
+  "Серые": "Grey",
+  "Белые": "White",
+  "Без цвета: {0} красок": "{0} paints without color",
+  "Все группы цветов": "All color groups",
   "Навести порядок": "To tidy up",
+  "Без тега: {0}": "No tag: {0}",
+  "Без цвета: {0}": "No color: {0}",
+  "Без штрихкода: {0}": "No barcode: {0}",
   "без тега: {0}": "no tag: {0}",
   "без цвета: {0}": "no color: {0}",
   "без штрихкода: {0}": "no barcode: {0}",
@@ -370,6 +392,8 @@ const EN = {
   "Пароли не совпадают": "Passwords don't match",
   "Пароль короче 4 символов": "The password is shorter than 4 characters",
   "Язык": "Language",
+  "Русский": "Russian",
+  "Английский": "English",
   "Камера при добавлении краски": "Camera when adding a paint",
   "«Фото» открывает приложение камеры. «Поток» ловит штрихкоды в живом видео, но без HTTPS требует флаг Chrome.": "“Photo” opens the camera app. “Live” catches barcodes in live video, but without HTTPS it needs a Chrome flag.",
   "Сейчас вход выключен: приложение открывается без пароля у всех в вашей сети.": "Sign-in is off: anyone on your network opens the app without a password.",

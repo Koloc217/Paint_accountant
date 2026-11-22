@@ -147,6 +147,8 @@ STARTER_TAGS: list[tuple[str, str, str, list[str]]] = [
     ("Для аэрографа", "Airbrush", "#ef6c00", ["air"]),
     # thinned and cleaned with alcohol or a lacquer thinner, not with water
     ("Спиртовая", "Alcohol-based", "#7cb342", ["alcohol", "lacquer"]),
+    # artist oils and oil washes
+    ("Масляные", "Oil", "#ff8f00", ["oil", "oils", "oilbrusher"]),
     # thinners, mediums, retarders, cleaners, putty, paint revitalizers
     ("Техническая", "Technical", "#607d8b",
      ["medium", "thinner", "thinners", "retarder", "flow", "improver", "diluent", "cleaner", "cleaners",
@@ -166,8 +168,7 @@ def _add_mr_hobby_and_the_alcohol_tag(conn: sqlite3.Connection) -> None:
     conn.execute("""INSERT INTO manufacturer (name) SELECT 'Mr. Hobby'
                     WHERE NOT EXISTS (SELECT 1 FROM manufacturer WHERE py_lower(name) = py_lower('Mr. Hobby'))""")
 
-    ru, en, color, keywords = STARTER_TAGS[-2]
-    assert (ru, en) == ("Спиртовая", "Alcohol-based")  # this migration is about that one tag
+    ru, en, color, keywords = next(t for t in STARTER_TAGS if t[:2] == ("Спиртовая", "Alcohol-based"))
     taken = conn.execute(
         """SELECT EXISTS (SELECT 1 FROM tag_keyword WHERE keyword = ?)
                   OR EXISTS (SELECT 1 FROM tag_name WHERE lang = 'ru' AND py_lower(name) = py_lower(?))
@@ -179,6 +180,27 @@ def _add_mr_hobby_and_the_alcohol_tag(conn: sqlite3.Connection) -> None:
     conn.executemany("INSERT INTO tag_name (tag_id, lang, name) VALUES (?, ?, ?)",
                      [(tag_id, "ru", ru), (tag_id, "en", en)])
     # a keyword already pointing at another tag stays with it
+    conn.executemany("INSERT OR IGNORE INTO tag_keyword (keyword, tag_id) VALUES (?, ?)",
+                     [(kw, tag_id) for kw in keywords])
+
+
+def _add_oil_tag(conn: sqlite3.Connection) -> None:
+    """Give a database made before the oil tag was starter data a chance to catch up.
+
+    Only if missing: a user who already sorted oil paints under a tag of his own keeps
+    what he has, and running this twice changes nothing.
+    """
+    ru, en, color, keywords = next(t for t in STARTER_TAGS if t[:2] == ("Масляные", "Oil"))
+    taken = conn.execute(
+        """SELECT EXISTS (SELECT 1 FROM tag_keyword WHERE keyword = ?)
+                  OR EXISTS (SELECT 1 FROM tag_name WHERE lang = 'ru' AND py_lower(name) = py_lower(?))
+                  OR EXISTS (SELECT 1 FROM tag_name WHERE lang = 'en' AND py_lower(name) = py_lower(?))""",
+        (keywords[0], ru, en)).fetchone()[0]
+    if taken:
+        return
+    tag_id = conn.execute("INSERT INTO tag (color) VALUES (?)", (color,)).lastrowid
+    conn.executemany("INSERT INTO tag_name (tag_id, lang, name) VALUES (?, ?, ?)",
+                     [(tag_id, "ru", ru), (tag_id, "en", en)])
     conn.executemany("INSERT OR IGNORE INTO tag_keyword (keyword, tag_id) VALUES (?, ?)",
                      [(kw, tag_id) for kw in keywords])
 
@@ -243,6 +265,8 @@ MIGRATIONS: list[str | Callable[[sqlite3.Connection], None]] = [
         WHERE NOT EXISTS (SELECT 1 FROM manufacturer
                           WHERE py_lower(name) IN (py_lower('Army Painter'), py_lower('The Army Painter')));
     """,
+    # 20 — a tag for oil paints and oil washes
+    _add_oil_tag,
 ]
 
 SCHEMA_VERSION = BASELINE_VERSION + len(MIGRATIONS)

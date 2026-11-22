@@ -401,7 +401,10 @@ async function exportDialog(params, filtered) {
   }
   try {
     const res = await fetch('/api/export/paints.md?' + q);
-    if (!res.ok) throw new Error(res.statusText);
+    if (!res.ok) {
+      toast(res.statusText || t('Ошибка {0}', res.status), 'err');
+      return;
+    }
     toast(await copyText(await res.text()) ? t('Список скопирован') : t('Не получилось скопировать — скачайте файл'), '');
   } catch (e) {
     toast(explain(e), 'err');
@@ -410,7 +413,8 @@ async function exportDialog(params, filtered) {
 
 export async function viewPaints(mount) {
   const [tags, storages, makers] = await Promise.all([api('GET', '/tags'), api('GET', '/storages'), api('GET', '/manufacturers')]);
-  const fab = h('a', { class: 'fab', href: '#/paint/new', 'aria-label': t('Добавить краску'), title: t('Добавить краску') }, '+');
+  const fab = h('a', { class: 'fab', href: '#/paint/new', 'aria-label': t('Добавить краску'), title: t('Добавить краску') });
+  fab.innerHTML = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><line x1="12" y1="4.5" x2="12" y2="19.5"></line><line x1="4.5" y1="12" x2="19.5" y2="12"></line></svg>';
   const browser = paintBrowser({
     f: filters, tags, storages, makers,
     onFabHref: f => { fab.href = f.storage && f.storage !== 'none' ? `#/paint/new?storage=${f.storage}` : '#/paint/new'; },

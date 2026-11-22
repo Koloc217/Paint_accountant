@@ -2,14 +2,20 @@
 
 import { t } from '../i18n.js';
 import { api, countPaints, countPots, h } from './core.js';
+import { onLeave } from './router.js';
 import { pageHead } from './shared.js';
 
 export async function viewStats(mount) {
+  document.body.classList.add('wide-stats');
+  onLeave(() => document.body.classList.remove('wide-stats'));
+
   const d = await api('GET', '/stats');
   const tot = d.totals;
 
-  const tile = (value, label) => h('div', { class: 'stat-tile' },
-    h('div', { class: 'stat-value' }, value), h('div', { class: 'muted small' }, label));
+  const tile = (value, label, sub = null, title = null) => h('div', { class: 'stat-tile', title: title || null },
+    h('div', { class: 'stat-value' }, value),
+    h('div', { class: 'muted small' }, label),
+    sub ? h('div', { class: 'stat-sub' }, sub) : null);
 
   /** Horizontal bars; an item with href is a link. */
   const bars = (items, { value, label, note, href = null, color = null }) => {
@@ -19,7 +25,7 @@ export async function viewStats(mount) {
       h('span', { class: 'bar-track' }, h('span', { class: 'bar-fill', style: `width:${Math.round(100 * value(it) / max)}%` + (color ? `;background:${color(it)}` : '') })),
       h('span', { class: 'bar-value' }, note ? note(it) : value(it)))));
   };
-  const section = (title, ...body) => h('div', null, h('h2', null, title), h('div', { class: 'panel' }, ...body));
+  const section = (title, ...body) => h('div', { class: 'stat-block' }, h('h2', null, title), h('div', { class: 'panel' }, ...body));
   const pct = n => (tot.pots ? Math.round(100 * n / tot.pots) : 0);
 
   // where the pots lie
@@ -60,14 +66,111 @@ export async function viewStats(mount) {
     value: x => x.paints, label: x => x.name, color: x => x.color,
   })) : null;
 
-  const tidy = d.tidy;
-  const tidySection = tot.paints ? section(t('Навести порядок'), h('div', { class: 'muted' },
-    [t('без тега: {0}', tidy.no_tag), t('без цвета: {0}', tidy.no_color), t('без штрихкода: {0}', tidy.no_barcode)]
-      .map(x => h('div', null, x)))) : null;
+  // Color palette / spectrum / wheel
+  let colorSection = null;
+  if (d.colors && d.colors.total_with_color) {
+    const col = d.colors;
+    const totColor = col.total_with_color;
 
-  mount(h('div', null, pageHead(t('Статистика'), null),
+    // SVG donut wheel
+    const r = 44;
+    const c = 2 * Math.PI * r;
+    let offset = 0;
+    const slices = col.groups.map(g => {
+      const len = (g.paints / totColor) * c;
+      const el = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      el.setAttribute('cx', '60');
+      el.setAttribute('cy', '60');
+      el.setAttribute('r', String(r));
+      el.setAttribute('fill', 'transparent');
+      el.setAttribute('stroke', g.color);
+      el.setAttribute('stroke-width', '18');
+      el.setAttribute('stroke-dasharray', `${len.toFixed(2)} ${(c - len).toFixed(2)}`);
+      el.setAttribute('stroke-dashoffset', `${(-offset).toFixed(2)}`);
+      el.innerHTML = `<title>${t(g.name)}: ${countPaints(g.paints)} (${Math.round(100 * g.paints / totColor)}%)</title>`;
+      offset += len;
+      return el;
+    });
+
+    const svgWheel = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svgWheel.setAttribute('class', 'wheel-svg');
+    svgWheel.setAttribute('viewBox', '0 0 120 120');
+    const gRotate = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    gRotate.setAttribute('transform', 'rotate(-90 60 60)');
+    slices.forEach(s => gRotate.appendChild(s));
+    svgWheel.appendChild(gRotate);
+
+    const txtCount = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    txtCount.setAttribute('x', '60');
+    txtCount.setAttribute('y', '56');
+    txtCount.setAttribute('text-anchor', 'middle');
+    txtCount.setAttribute('class', 'wheel-text-count');
+    txtCount.textContent = String(totColor);
+    svgWheel.appendChild(txtCount);
+
+    const txtLbl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    txtLbl.setAttribute('x', '60');
+    txtLbl.setAttribute('y', '72');
+    txtLbl.setAttribute('text-anchor', 'middle');
+    txtLbl.setAttribute('class', 'wheel-text-lbl');
+    txtLbl.textContent = t('с цветом');
+    svgWheel.appendChild(txtLbl);
+
+    // Spectrum strip
+    const spectrumBar = h('div', { class: 'spectrum-bar' },
+      col.groups.map(g => h('div', {
+        class: 'spectrum-slice',
+        style: `width:${(100 * g.paints / totColor).toFixed(2)}%;background:${g.color}`,
+        title: `${t(g.name)}: ${countPaints(g.paints)} (${Math.round(100 * g.paints / totColor)}%)`,
+      })));
+
+    // Group rows with real paint swatches
+    const groupRows = h('div', { class: 'palette-groups' },
+      col.groups.map(g => h('div', { class: 'color-group-row' },
+        h('span', { class: 'color-dot', style: `background:${g.color}` }),
+        h('span', { class: 'color-name' }, t(g.name)),
+        h('span', { class: 'color-count' }, `${g.paints} · ${Math.round(100 * g.paints / totColor)}%`),
+        h('div', { class: 'color-swatches' },
+          g.samples.map(p => h('a', {
+            class: 'swatch-dot',
+            href: `#/paint/${p.id}`,
+            style: `background:${p.hex}`,
+            title: `${p.name} · ${p.manufacturer}${p.code ? ' · ' + p.code : ''}`,
+          }))))));
+
+    colorSection = section(t('Цветовая палитра'),
+      h('div', { class: 'palette-layout' },
+        spectrumBar,
+        h('div', { class: 'palette-body' },
+          h('div', { class: 'wheel-wrap' }, svgWheel),
+          groupRows),
+        col.without_color
+          ? h('p', { class: 'muted small', style: 'margin:4px 0 0' }, t('Без цвета: {0} красок', col.without_color))
+          : null));
+  }
+
+  const tidy = d.tidy || {};
+  const tidyItems = [
+    tidy.no_tag ? t('Без тега: {0}', tidy.no_tag) : null,
+    tidy.no_color ? t('Без цвета: {0}', tidy.no_color) : null,
+    tidy.no_barcode ? t('Без штрихкода: {0}', tidy.no_barcode) : null,
+  ].filter(Boolean);
+
+  const tidyTile = tidyItems.length
+    ? h('div', { class: 'stat-tile stat-tile-tidy' + (tidyItems.length >= 3 ? ' many' : ''), title: tidyItems.join('\n') },
+        tidyItems.map(txt => h('div', { class: 'stat-tidy-line' }, txt)))
+    : h('div', { class: 'stat-tile', title: t('всё в порядке') },
+        h('div', { class: 'stat-value', style: 'color: var(--accent);' }, '✓'),
+        h('div', { class: 'muted small' }, t('всё в порядке')));
+
+  const blocks = [where, makers, colorSection, tags, repeats, twins].filter(Boolean);
+  const sections = h('div', { class: 'stat-blocks' }, ...blocks);
+
+  mount(h('div', { class: 'stats-view' }, pageHead(t('Статистика'), null),
     h('div', { class: 'stat-grid' },
-      tile(tot.paints, t('красок')), tile(tot.pots, t('банок')),
-      tile(tot.storages, t('хранилищ')), tile(tot.out_of_stock, t('закончились'))),
-    where, repeats, twins, makers, tags, tidySection));
+      tile(tot.paints, t('красок')),
+      tile(tot.pots, t('банок')),
+      tile(tot.storages, t('хранилищ')),
+      tidyTile),
+    sections));
 }

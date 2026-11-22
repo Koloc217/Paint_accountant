@@ -55,3 +55,39 @@ def test_possible_duplicates_and_tidy(client):
     assert g["manufacturer"] == "Citadel" and [p["id"] for p in g["paints"]][1] == b["id"]
     assert d["tidy"] == {"no_tag": 2, "no_color": 2, "no_barcode": 2}
     assert len(d["tags"]) == 1 and d["tags"][0]["paints"] == 1
+
+
+def test_user_created_manufacturers_in_stats(client):
+    # Create paints across 10 different manufacturers (including user-created ones)
+    makers = ["AK", "Army Painter", "Citadel", "Green Stuff World", "Kaleido",
+              "Kimera", "Mr. Hobby", "Scale75", "Vallejo", "Daler-Rowney", "Pacific88"]
+    for i, m in enumerate(makers):
+        client.post("/api/paints", json={"name": f"Paint {i}", "manufacturer": m, "quantity": 1})
+
+    d = client.get("/api/stats").json()
+    stat_makers = [x["name"] for x in d["manufacturers"]]
+    # All 11 manufacturers, including user-created Daler-Rowney and Pacific88, must be present
+    for m in makers:
+        assert m in stat_makers
+    assert len(stat_makers) == len(makers)
+
+
+def test_color_spectrum_in_stats(client):
+    client.post("/api/paints", json={"name": "Khorne Red", "manufacturer": "Citadel", "hex": "#e53935"})
+    client.post("/api/paints", json={"name": "Macragge Blue", "manufacturer": "Citadel", "hex": "#1e88e5"})
+    client.post("/api/paints", json={"name": "Mournfang Brown", "manufacturer": "Citadel", "hex": "#6d4c41"})
+    client.post("/api/paints", json={"name": "No Color Paint", "manufacturer": "Vallejo"})
+
+    d = client.get("/api/stats").json()
+    assert "colors" in d
+    assert d["colors"]["total_with_color"] == 3
+    assert d["colors"]["without_color"] == 1
+    group_ids = [g["id"] for g in d["colors"]["groups"]]
+    assert "red" in group_ids
+    assert "blue" in group_ids
+    assert "brown" in group_ids
+    red_grp = next(g for g in d["colors"]["groups"] if g["id"] == "red")
+    assert red_grp["paints"] == 1
+    assert red_grp["samples"][0]["name"] == "Khorne Red"
+
+

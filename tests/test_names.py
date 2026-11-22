@@ -23,6 +23,7 @@ def tag(client, ru_name):
 def test_starter_tags_have_english_names(client):
     assert tag(client, "Проливка")["names"] == {"ru": "Проливка", "en": "Wash"}
     assert tag(client, "Техническая")["names"]["en"] == "Technical"
+    assert tag(client, "Масляные")["names"] == {"ru": "Масляные", "en": "Oil"}
     assert tag(client, "Грунт")["name"] == "Грунт"  # "name" is the Russian one
 
 
